@@ -135,6 +135,17 @@ export interface NotificationStatus {
   lastError: string;
 }
 
+export interface UpdateInfo {
+  available: boolean;
+  currentVersion: string;
+  currentVersionCode: number;
+  latestVersion: string;
+  latestVersionCode: number;
+  notes: string;
+  apkUrl: string;
+  apkSize: number;
+}
+
 export interface FinanceAPI {
   readonly native: boolean;
   snapshot(): Promise<Snapshot>;
@@ -162,5 +173,8 @@ export interface FinanceAPI {
   notificationOpenSettings(): Promise<void>;
   notificationSetEnabled(enabled: boolean): Promise<void>;
   notificationImport(): Promise<number>;
+  checkUpdate(): Promise<UpdateInfo>;
+  downloadUpdate(url: string): Promise<boolean>;
+  installUpdate(): Promise<boolean>;
 }
 

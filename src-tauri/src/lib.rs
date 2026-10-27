@@ -245,7 +245,10 @@ pub fn run() {
             notifications::notification_status,
             notifications::notification_open_settings,
             notifications::notification_set_enabled,
-            notifications::notification_import
+            notifications::notification_import,
+            notifications::check_app_update,
+            notifications::download_app_update,
+            notifications::install_app_update
         ])
         .run(tauri::generate_context!())
         .expect("Tidak dapat memulai aplikasi Arus");

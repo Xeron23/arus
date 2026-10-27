@@ -693,6 +693,32 @@ document.addEventListener("click", async (e) => {
         toast(count ? `${count} notifikasi transaksi diproses.` : "Tidak ada notifikasi baru.");
         break;
       }
+      case "check-update": {
+        toast("Memeriksa pembaruan di GitHub...");
+        const u = await api.checkUpdate();
+        if (u.available) {
+          sheet(
+            "Pembaruan Tersedia",
+            `<div class="stage-note" style="padding:15px"><div class="badge green">Versi Baru ${esc(u.latestVersion)}</div><h3 style="margin:10px 0 6px">Pembaruan siap dipasang</h3><p class="small muted">${esc(u.notes)}</p><p class="tiny muted" style="margin-top:8px">Ukuran: ${(u.apkSize / (1024 * 1024)).toFixed(1)} MB</p></div><div class="button-row" style="margin-top:15px"><button class="btn primary w-full" data-act="download-update" data-url="${esc(u.apkUrl)}">Unduh & Pasang Pembaruan</button></div>`
+          );
+        } else {
+          toast(`Aplikasi sudah versi terbaru (${u.currentVersion || "v0.2.0"}).`);
+        }
+        break;
+      }
+      case "download-update": {
+        const url = el.getAttribute("data-url") || "";
+        toast("Mengunduh update APK...");
+        close();
+        const ok = await api.downloadUpdate(url);
+        if (ok) {
+          toast("Unduhan selesai! Membuka installer...");
+          await api.installUpdate();
+        } else {
+          toast("Gagal mengunduh pembaruan.");
+        }
+        break;
+      }
       case "sync":
         await sync();
         break;

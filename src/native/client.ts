@@ -50,6 +50,12 @@ class NativeAPI implements FinanceAPI {
     invoke("notification_set_enabled", { enabled });
   notificationImport: FinanceAPI["notificationImport"] = () =>
     invoke<number>("notification_import");
+  checkUpdate: FinanceAPI["checkUpdate"] = () =>
+    invoke<import("../models").UpdateInfo>("check_app_update");
+  downloadUpdate: FinanceAPI["downloadUpdate"] = (url) =>
+    invoke<boolean>("download_app_update", { url });
+  installUpdate: FinanceAPI["installUpdate"] = () =>
+    invoke<boolean>("install_app_update");
 }
 // Native errors never fall back to mock: this would disguise failed real sync.
 export const api: FinanceAPI = isTauri() ? new NativeAPI() : new MockAPI();

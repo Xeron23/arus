@@ -652,5 +652,23 @@ export class MockAPI implements FinanceAPI {
   async notificationImport() {
     return 0;
   }
+  async checkUpdate() {
+    return {
+      available: false,
+      currentVersion: "1.0.0",
+      currentVersionCode: 1,
+      latestVersion: "1.0.0",
+      latestVersionCode: 1,
+      notes: "Mode browser / mock",
+      apkUrl: "",
+      apkSize: 0,
+    };
+  }
+  async downloadUpdate() {
+    return true;
+  }
+  async installUpdate() {
+    return true;
+  }
 }
 

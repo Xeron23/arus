@@ -168,3 +168,87 @@ pub async fn notification_import(app: AppHandle) -> Result<usize, String> {
         Ok(0)
     }
 }
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateInfo {
+    pub available: bool,
+    pub current_version: String,
+    pub current_version_code: i64,
+    pub latest_version: String,
+    pub latest_version_code: i64,
+    pub notes: String,
+    pub apk_url: String,
+    pub apk_size: i64,
+}
+
+#[tauri::command]
+pub async fn check_app_update(app: AppHandle) -> Result<UpdateInfo, String> {
+    #[cfg(target_os = "android")]
+    {
+        let res = tauri::async_runtime::spawn_blocking(move || {
+            let plugin = app.state::<Native<tauri::Wry>>();
+            plugin.0.run_mobile_plugin::<Value>("checkUpdate", json!({}))
+        })
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
+
+        let info: UpdateInfo = serde_json::from_value(res).map_err(|e| e.to_string())?;
+        Ok(info)
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app;
+        Ok(UpdateInfo {
+            available: false,
+            current_version: "1.0.0".to_string(),
+            current_version_code: 1,
+            latest_version: "1.0.0".to_string(),
+            latest_version_code: 1,
+            notes: "Mode desktop/browser".to_string(),
+            apk_url: "".to_string(),
+            apk_size: 0,
+        })
+    }
+}
+
+#[tauri::command]
+pub async fn download_app_update(app: AppHandle, url: String) -> Result<bool, String> {
+    #[cfg(target_os = "android")]
+    {
+        tauri::async_runtime::spawn_blocking(move || -> Result<bool, String> {
+            let plugin = app.state::<Native<tauri::Wry>>();
+            let _ = plugin.0.run_mobile_plugin::<Value>("downloadUpdate", json!({ "url": url }))
+                .map_err(|e| e.to_string())?;
+            Ok(true)
+        })
+        .await
+        .map_err(|e| e.to_string())?
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = (app, url);
+        Ok(false)
+    }
+}
+
+#[tauri::command]
+pub async fn install_app_update(app: AppHandle) -> Result<bool, String> {
+    #[cfg(target_os = "android")]
+    {
+        tauri::async_runtime::spawn_blocking(move || -> Result<bool, String> {
+            let plugin = app.state::<Native<tauri::Wry>>();
+            let _ = plugin.0.run_mobile_plugin::<Value>("installUpdate", json!({}))
+                .map_err(|e| e.to_string())?;
+            Ok(true)
+        })
+        .await
+        .map_err(|e| e.to_string())?
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app;
+        Ok(false)
+    }
+}

@@ -90,37 +90,60 @@ jobs:
           "$BT/apksigner" sign --ks /tmp/release.keystore --ks-pass pass:aruspassword123 --key-pass pass:aruspassword123 --ks-key-alias arus-key --out dist-apks/arus-release.apk /tmp/release-aligned.apk
           "$BT/apksigner" verify --verbose dist-apks/arus-release.apk
 
+          # Generate latest.json manifest for in-app updater
+          RELEASE_APK="dist-apks/arus-release.apk"
+          APK_SIZE=$(stat -c%s "$RELEASE_APK")
+          APK_SHA=$(sha256sum "$RELEASE_APK" | awk '{print $1}')
+          REF_TAG="${{ github.ref_name || 'v0.3.0' }}"
+          CLEAN_VER="${REF_TAG#v}"
+
+          cat << JSON_EOF > dist-apks/latest.json
+          {
+            "schema": 1,
+            "applicationId": "id.arus.finance",
+            "version": "$CLEAN_VER",
+            "versionCode": 30,
+            "notes": "Pembaruan Arus v$CLEAN_VER: Logo resmi aplikasi, Notification Listener (QRIS, GoPay, DANA), dan In-App Auto-Updater.",
+            "apk": {
+              "abi": "arm64-v8a",
+              "minSdk": 24,
+              "url": "https://github.com/Xeron23/arus/releases/download/$REF_TAG/arus-release.apk",
+              "size": $APK_SIZE,
+              "sha256": "$APK_SHA"
+            }
+          }
+          JSON_EOF
+
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: arus-signed-apks
-          path: dist-apks/*.apk
+          path: dist-apks/*
 
       - name: Create or Update GitHub Release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         with:
-          tag_name: ${{ github.ref_name || 'v0.1.0' }}
-          name: Arus v0.1.0 — Local-First Personal Finance (Signed APK)
+          tag_name: ${{ github.ref_name || 'v0.3.0' }}
+          name: Arus ${{ github.ref_name || 'v0.3.0' }} — Local-First Personal Finance
           body: |
-            ## Arus v0.1.0 — Signed Android APK Release
+            ## Arus ${{ github.ref_name || 'v0.3.0' }} — Android APK Release
             
             Aplikasi keuangan personal lokal (**100% Local-First**) tanpa backend server perantara.
             
-            Semua APK sudah **di-align dan di-sign resmi (v2/v3 signing)** dengan `apksigner` sehingga kompatibel dan bisa langsung diinstal di semua perangkat Android (Android 7.0+ / arm64-v8a).
+            ### Fitur Baru di Rilis Ini:
+            - **Logo Baru Aplikasi**: Ikon resmi Arus (gelombang dinamis hijau & lime) pada launcher Android.
+            - **Notification Listener**: Deteksi instan transaksi GoPay, DANA, OVO, ShopeePay, dan QRIS.
+            - **In-App Auto-Updater**: Periksa dan pasang pembaruan langsung dari dalam aplikasi via tombol di Pengaturan.
             
-            ### Varian APK yang Tersedia:
-            - **`arus-release.apk` (Lightweight / Optimized)**: Versi ramping (~20MB) dengan binary native yang sudah di-strip untuk penggunaan harian.
-            - **`arus-debug.apk` (Developer / Diagnostics)**: Versi dengan symbol debug untuk tracing logcat dan pengujian developer.
-            
-            ### Panduan Instalasi di HP Android:
-            1. Download file `arus-release.apk` ke HP Anda.
-            2. Buka file APK melalui File Manager / Browser Download.
-            3. Jika muncul peringatan *"Install unknown apps"*, pilih **Allow / Izinkan dari sumber ini**.
-            4. Klik **Install**.
+            ### Varian APK:
+            - **`arus-release.apk` (Lightweight / Optimized)**: Versi ramping (~21MB) untuk penggunaan harian.
+            - **`arus-debug.apk` (Developer / Diagnostics)**: Versi debug dengan simbol pelacakan logcat.
+            - **`latest.json`**: Manifest pembaruan otomatis in-app updater.
           files: |
             dist-apks/arus-debug.apk
             dist-apks/arus-release.apk
+            dist-apks/latest.json
           draft: false
           prerelease: false
         env:

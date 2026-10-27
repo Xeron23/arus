@@ -42,8 +42,24 @@ fs.writeFileSync(
   debug,
   '<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools"><uses-permission android:name="android.permission.INTERNET"/><application android:usesCleartextTraffic="true" android:networkSecurityConfig="@xml/arus_network_security_debug" tools:replace="android:usesCleartextTraffic,android:networkSecurityConfig"/></manifest>',
 );
+
+// Copy custom icon to Android mipmaps
+const iconSrc = "src-tauri/icons/icon.png";
+if (fs.existsSync(iconSrc)) {
+  const resDir = "src-tauri/gen/android/app/src/main/res";
+  if (fs.existsSync(resDir)) {
+    const mipmaps = fs.readdirSync(resDir).filter((d) => d.startsWith("mipmap-"));
+    for (const d of mipmaps) {
+      try {
+        fs.copyFileSync(iconSrc, `${resDir}/${d}/ic_launcher.png`);
+        fs.copyFileSync(iconSrc, `${resDir}/${d}/ic_launcher_round.png`);
+      } catch (_) {}
+    }
+  }
+}
+
 console.log(
-  "Android ready: INTERNET; automatic Android backup off; cleartext allowed only in debug.",
+  "Android ready: INTERNET, update FileProvider, custom logo, secure backup off.",
 );
 
 
