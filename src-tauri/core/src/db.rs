@@ -340,8 +340,13 @@ impl Database {
                 validate_entry(&tx, e)?;
                 tx.execute("UPDATE ledger SET deleted=0,wallet_id=?1,to_wallet_id=?2,kind=?3,amount=?4,merchant=?5,category=?6,occurred_at=?7,note=?8 WHERE id=?9",params![e.wallet_id,e.to_wallet_id,e.kind,e.amount,e.merchant,category_for(e),e.occurred_at,e.note,id])?;
             } else {
-                // If reference exists, insert entry anyway without duplicate block on user manual review confirmation
-                insert_entry(&tx, e, reference, Some(&r.email_id), "Email", bank)?;
+                // If reference exists, insert entry without reference constraint conflict on user manual review confirmation
+                let safe_ref = if reference_duplicate(&tx, &e.wallet_id, bank, reference)? {
+                    None
+                } else {
+                    reference
+                };
+                insert_entry(&tx, e, safe_ref, Some(&r.email_id), "Email", bank)?;
             }
             tx.execute("UPDATE emails SET status='posted',reason='Dikonfirmasi dan dikoreksi pengguna' WHERE id=?1",[&r.email_id])?;
         } else {

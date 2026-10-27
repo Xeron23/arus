@@ -563,26 +563,32 @@ document.addEventListener("click", async (e) => {
         const pending = data.emails.filter((e) => e.status === "review");
         if (!pending.length) break;
         let count = 0;
+        let errors = 0;
         for (const e of pending) {
           if (!e.parsed) continue;
-          await api.resolve({
-            emailId: e.id,
-            action: "post",
-            entry: {
-              walletId: e.parsed.walletId,
-              toWalletId: e.parsed.toWalletId,
-              kind: e.parsed.kind as Kind,
-              amount: e.parsed.amount,
-              merchant: e.parsed.merchant,
-              category: e.parsed.category,
-              occurredAt: e.parsed.occurredAt,
-              note: "",
-            },
-          });
-          count++;
+          try {
+            await api.resolve({
+              emailId: e.id,
+              action: "post",
+              entry: {
+                walletId: e.parsed.walletId,
+                toWalletId: e.parsed.toWalletId,
+                kind: e.parsed.kind as Kind,
+                amount: e.parsed.amount,
+                merchant: e.parsed.merchant,
+                category: e.parsed.category,
+                occurredAt: e.parsed.occurredAt,
+                note: "",
+              },
+            });
+            count++;
+          } catch (err) {
+            console.error("Gagal catat email:", e.id, err);
+            errors++;
+          }
         }
         await refresh();
-        toast(`${count} transaksi berhasil dicatat.`);
+        toast(`${count} transaksi dicatat.${errors ? ` (${errors} gagal)` : ""}`);
         break;
       }
       case "audit":
