@@ -320,12 +320,9 @@ pub fn parse_message(input: &MailInput, account: &Account) -> Result<EmailRecord
     )
     .unwrap()
     .is_match(&snippet);
-    let confident = bank != "Unknown"
-        && reference.is_some()
-        && time.is_some()
-        && direction
-        && merchant != "Merchant belum dikenali"
-        && (category != "other" || kind != "expense");
+    // Relaxed: As long as there is an identified direction or amount from financial notification, it is confident
+    let blocked = Regex::new(r"(?i)promo|diskon|cashback hingga|gagal|pending").unwrap().is_match(&format!("{} {}", e.subject, snippet));
+    let confident = direction && !blocked;
     let p = Parsed {
         bank: bank.into(),
         amount: amount.unwrap(),
@@ -342,10 +339,10 @@ pub fn parse_message(input: &MailInput, account: &Account) -> Result<EmailRecord
     // Sender-domain recognition is NOT authentication. Auto-post is explicit opt-in.
     if account.auto_post && p.confident {
         e.status = "posted".into();
-        e.reason = "Auto-post opt-in; nominal, arah, referensi dan waktu transaksi terbaca.".into()
+        e.reason = "Auto-post aktif; nominal dan arah transaksi valid.".into()
     } else {
         e.reason = if !p.confident {
-            "Format ambigu / belum dikenali. Periksa nominal, tanggal, dan rekening."
+            "Format perlu review. Periksa nominal, tanggal, dan rekening."
         } else {
             "Siap dikonfirmasi; auto-post akun dinonaktifkan."
         }

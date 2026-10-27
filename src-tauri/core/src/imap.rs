@@ -281,7 +281,8 @@ pub async fn sync<F: Fn(SyncProgress) + Send + Sync>(
         .map_err(|_| AppError::new("SEARCH_TIMEOUT", "Pencarian UID habis waktu."))?
         .map_err(|_| AppError::new("IMAP_SEARCH", "Pencarian UID gagal."))?;
         let mut uids = db.pending_uids(&account.id, folder, validity, found.into_iter().collect())?;
-        uids.sort_unstable();
+        // Sort descending: process NEWEST emails first so recent transactions appear immediately
+        uids.sort_unstable_by(|a, b| b.cmp(a));
         let total = uids.len() as u32;
         let available = 200u32.saturating_sub(report.fetched) as usize;
         report.remaining += uids.len().saturating_sub(available) as u32;
