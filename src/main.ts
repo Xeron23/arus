@@ -1,6 +1,8 @@
 import "./styles.css";
 import { api, errorText } from "./native/client";
 import type { Snapshot, Kind, EntryInput, ConnectionInput, ConnectionReport, SyncProgress, ReviewInput, AccountUpdate } from "./models";
+import { getSyncRange, setSyncRange, syncRangeOptions } from "./sync-options";
+import { installSheetGesture } from "./sheet-gesture";
 import {
   shell,
   esc,
@@ -316,12 +318,16 @@ async function sync() {
         total: 0,
       }),
     );
-    const r = await api.sync(null, (p) => {
-      if (!$("#overlay").classList.contains("hidden")) $("#sheetBody").innerHTML = syncBody(p);
-      const inline = $("#syncInline");
-      if (inline)
-        inline.innerHTML = `<div class="sync-inline"><p class="tiny muted">${esc(p.message)}</p><div class="progress"><span style="width:${p.total ? Math.round((p.current / p.total) * 100) : 10}%"></span></div></div>`;
-    });
+    const r = await api.sync(
+      null,
+      (p) => {
+        if (!$("#overlay").classList.contains("hidden")) $("#sheetBody").innerHTML = syncBody(p);
+        const inline = $("#syncInline");
+        if (inline)
+          inline.innerHTML = `<div class="sync-inline"><p class="tiny muted">${esc(p.message)}</p><div class="progress"><span style="width:${p.total ? Math.round((p.current / p.total) * 100) : 10}%"></span></div></div>`;
+      },
+      getSyncRange(),
+    );
     await refresh();
     sheet(
       "Sinkronisasi selesai",
@@ -396,10 +402,17 @@ function exportCsv() {
   setTimeout(() => URL.revokeObjectURL(url), 2000);
   toast("Laporan CSV disiapkan untuk diunduh.");
 }
+function syncOptions() {
+  sheet(
+    "Pilih periode email",
+    `<p class="small muted">Pilih rentang waktu email yang ingin diperiksa. Email yang sudah dicatat tidak akan dicatat ganda.</p>${select("syncRange", "Rentang waktu", syncRangeOptions())}<div class="notice">Semua email diproses bertahap, maksimal 200 email per akun dalam satu proses.</div>${btn("sync-start", "Mulai sinkronisasi", "primary")}`
+  );
+}
+
 function showHelp() {
   sheet(
     "Tentang Arus",
-    `<div class="wizard-illustration">${icon("shield")}</div><h3 class="wizard-title">Uangmu, utuh. Di perangkatmu.</h3><div class="notice">${api.native ? "Rust menangani TCP/TLS IMAP dan SQLite dalam sandbox aplikasi. Tidak ada server pengembang." : "Mode mock browser: data contoh di IndexedDB, tanpa koneksi ke email asli."}</div><div class="card"><div class="detail-line"><span>Database native</span><span>SQLite lokal, WAL; belum SQLCipher</span></div><div class="detail-line"><span>App Password</span><span>Memori sesi; tidak ditulis ke disk</span></div><div class="detail-line"><span>IMAP</span><span>EXAMINE, UIDVALIDITY, BODY.PEEK</span></div><div class="detail-line"><span>Parser</span><span>Fallback konservatif; format baru ke Review</span></div><div class="detail-line"><span>Server cloud pengembang</span><span>Tidak ada</span></div></div><p class="small muted">IMAP memerlukan internet untuk terhubung langsung ke provider email. Pada Android, auto-backup perangkat dinonaktifkan oleh konfigurasi build project ini.</p>`,
+    `<div class="wizard-illustration">${icon("shield")}</div><h3 class="wizard-title">Keuangan tertata, privasi terjaga.</h3><p class="small">Arus membantu Anda mencatat pemasukan, pengeluaran, dan mutasi secara otomatis langsung di perangkat Anda.</p><div class="notice">${api.native ? "Catatan keuangan Anda tersimpan di ponsel dan tidak dikirim ke server pengembang." : "Ini adalah pratinjau dengan data contoh. Email asli tidak dihubungkan."}</div><div class="card"><div class="detail-line"><span>Catatan Anda</span><span>Tersimpan di perangkat</span></div><div class="detail-line"><span>Email Anda</span><span>Tetap aman & belum dibaca</span></div><div class="detail-line"><span>Kata sandi email</span><span>Hanya selama sesi aktif (RAM)</span></div><div class="detail-line"><span>Versi Arus</span><span>v0.3.4</span></div></div><p class="small muted">Koneksi internet hanya digunakan saat mengambil email atau memeriksa pembaruan.</p>`,
   );
 }
 let press: { id: string; pointer: number; x: number; y: number; timer: ReturnType<typeof setTimeout> } | null = null;
@@ -735,6 +748,9 @@ document.addEventListener("click", async (e) => {
         await refresh();
         break;
       case "sync":
+        syncOptions();
+        break;
+      case "sync-start":
         await sync();
         break;
       case "go-review":
@@ -786,6 +802,9 @@ document.addEventListener("change", (e) => {
   if (target.id === "walletSelect") {
     view.wallet = target.value;
     render();
+  }
+  if (target.name === "syncRange") {
+    setSyncRange(target.value);
   }
   if (target.id === "f-provider") {
     $("#customFields").classList.toggle("hidden", target.value !== "Custom");
@@ -932,6 +951,7 @@ document.addEventListener("keydown", (e) => {
     }
   }
 });
+installSheetGesture(close);
 $("#app").innerHTML =
   '<div class="phone p-6"><div class="skeleton mt-20"></div><p class="text-center muted mt-8">Membuka buku kas lokal…</p></div>';
 refresh().catch((e) => {

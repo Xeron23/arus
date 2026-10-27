@@ -178,19 +178,17 @@ pub async fn test(input: ConnectionInput) -> Result<ConnectionReport> {
 pub async fn test_endpoint(ep: &Endpoint) -> Result<ConnectionReport> {
     let start = Instant::now();
     let mut s = connect(ep).await?;
-    let folders = folders(&mut s).await?;
-    for f in &folders {
-        timeout(Duration::from_secs(15), s.examine(f))
-            .await
-            .map_err(|_| AppError::new("EXAMINE_TIMEOUT", "Membaca metadata folder habis waktu."))?
-            .map_err(|_| AppError::new("IMAP_EXAMINE", "Folder tidak dapat dibuka read-only."))?;
-    }
+    // Only examine INBOX for rapid TLS connection verification (1-2s) instead of looping all archive folders
+    timeout(Duration::from_secs(10), s.examine("INBOX"))
+        .await
+        .map_err(|_| AppError::new("EXAMINE_TIMEOUT", "Membaca metadata folder habis waktu."))?
+        .map_err(|_| AppError::new("IMAP_EXAMINE", "Folder tidak dapat dibuka read-only."))?;
     let _ = timeout(Duration::from_secs(3), s.logout()).await;
     Ok(ConnectionReport {
         host: ep.host.clone(),
         port: ep.port,
         provider: ep.provider.clone(),
-        folder: folders.join(" + "),
+        folder: "INBOX".into(),
         elapsed_ms: start.elapsed().as_millis() as u64,
         tls: true,
     })
