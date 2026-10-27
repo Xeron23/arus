@@ -1,150 +1,110 @@
 name: Build and Release Android APK
-
 on:
   push:
-    tags:
-      - 'v*'
-    branches:
-      - main
+    branches: [main]
+    tags: ['v*']
   workflow_dispatch:
-
 permissions:
   contents: write
-
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
   build-android:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Setup Java 17
-        uses: actions/setup-java@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
         with:
-          distribution: 'zulu'
+          distribution: zulu
           java-version: '17'
-
-      - name: Setup Node.js 22
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
-
-      - name: Setup Rust Toolchain
-        uses: dtolnay/rust-toolchain@stable
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
-
-      - name: Setup Android NDK and SDK
+          targets: aarch64-linux-android
+      - name: Install dependencies and validate
         run: |
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
-          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "ndk;26.1.10909125" "build-tools;34.0.0" "platforms;android-34" "platforms;android-36"
-          echo "NDK_HOME=$ANDROID_HOME/ndk/26.1.10909125" >> $GITHUB_ENV
-
-      - name: Install Dependencies
-        run: npm install
-
-      - name: Initialize Tauri Android
+          npm ci
+          node scripts/check-version.mjs
+          npm test
+          npm run test:rust
+          npm run build
+        env:
+          RELEASE_REF: ${{ github.ref }}
+      - name: Setup Android SDK and NDK
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;28.0.13004108" "build-tools;35.0.0" "platforms;android-36"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/28.0.13004108" >> "$GITHUB_ENV"
+      - name: Initialize Android
         run: |
           npx tauri android init --ci
           node scripts/android-prepare.mjs
-
-      - name: Generate Signing Keystore
+      - name: Restore persistent release signing identity
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
-          keytool -genkeypair -v \
-            -keystore /tmp/release.keystore \
-            -alias arus-key \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 10000 \
-            -storepass "aruspassword123" \
-            -keypass "aruspassword123" \
-            -dname "CN=Arus Finance, OU=Mobile, O=Arus, L=Jakarta, ST=Jakarta, C=ID"
-
-      - name: Build Debug APK
+          set -euo pipefail
+          umask 077
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/arus-release.jks"
+          else
+            echo "Generating consistent build keystore..."
+            keytool -genkeypair -v \
+              -keystore "$RUNNER_TEMP/arus-release.jks" \
+              -alias arus-key \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -storepass "aruspassword123" \
+              -keypass "aruspassword123" \
+              -dname "CN=Arus Finance, OU=Mobile, O=Arus, L=Jakarta, ST=Jakarta, C=ID"
+          fi
+      - name: Build and sign release APK
+        shell: bash
+        env:
+          STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD || 'aruspassword123' }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD || 'aruspassword123' }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS || 'arus-key' }}
         run: |
-          npx tauri android build --apk --debug --target aarch64
-          mkdir -p dist-apks
-          BT="$ANDROID_HOME/build-tools/34.0.0"
-          
-          # Find generated debug APK
-          DEBUG_RAW=$(find src-tauri/gen/android/app/build/outputs/apk -name "*debug*.apk" | head -n 1)
-          echo "Found debug raw: $DEBUG_RAW"
-          
-          # Zipalign and sign to ensure certificate validity
-          "$BT/zipalign" -f -v 4 "$DEBUG_RAW" /tmp/debug-aligned.apk
-          "$BT/apksigner" sign --ks /tmp/release.keystore --ks-pass pass:aruspassword123 --key-pass pass:aruspassword123 --ks-key-alias arus-key --out dist-apks/arus-debug.apk /tmp/debug-aligned.apk
-          "$BT/apksigner" verify --verbose dist-apks/arus-debug.apk
-
-      - name: Build Release APK (Lightweight / Signed)
-        run: |
+          set -euo pipefail
           npx tauri android build --apk --target aarch64
-          BT="$ANDROID_HOME/build-tools/34.0.0"
-          
-          # Find generated release APK
-          RELEASE_RAW=$(find src-tauri/gen/android/app/build/outputs/apk -name "*unsigned*.apk" -o -name "*release*.apk" | grep -v "debug" | head -n 1)
-          echo "Found release raw: $RELEASE_RAW"
-          
-          # Zipalign and sign release APK
-          "$BT/zipalign" -f -v 4 "$RELEASE_RAW" /tmp/release-aligned.apk
-          "$BT/apksigner" sign --ks /tmp/release.keystore --ks-pass pass:aruspassword123 --key-pass pass:aruspassword123 --ks-key-alias arus-key --out dist-apks/arus-release.apk /tmp/release-aligned.apk
-          "$BT/apksigner" verify --verbose dist-apks/arus-release.apk
-
-          # Generate latest.json manifest for in-app updater
-          RELEASE_APK="dist-apks/arus-release.apk"
-          APK_SIZE=$(stat -c%s "$RELEASE_APK")
-          APK_SHA=$(sha256sum "$RELEASE_APK" | awk '{print $1}')
-          REF_TAG="${{ github.ref_name || 'v0.3.0' }}"
-          CLEAN_VER="${REF_TAG#v}"
-
-          cat << JSON_EOF > dist-apks/latest.json
-          {
-            "schema": 1,
-            "applicationId": "id.arus.finance",
-            "version": "$CLEAN_VER",
-            "versionCode": 30,
-            "notes": "Pembaruan Arus v$CLEAN_VER: Logo resmi aplikasi, Notification Listener (QRIS, GoPay, DANA), dan In-App Auto-Updater.",
-            "apk": {
-              "abi": "arm64-v8a",
-              "minSdk": 24,
-              "url": "https://github.com/Xeron23/arus/releases/download/$REF_TAG/arus-release.apk",
-              "size": $APK_SIZE,
-              "sha256": "$APK_SHA"
-            }
-          }
-          JSON_EOF
-
-      - name: Upload Artifacts
+          BT="$ANDROID_HOME/build-tools/35.0.0"
+          test -d "$BT" || BT="$ANDROID_HOME/build-tools/34.0.0"
+          mapfile -t APKS < <(find src-tauri/gen/android/app/build/outputs/apk -type f -path '*/release/*' -name '*-unsigned.apk')
+          test "${#APKS[@]}" -ge 1 || { echo 'Expected at least one unsigned release APK'; exit 1; }
+          mkdir -p dist-apks
+          "$BT/zipalign" -f -P 16 4 "${APKS[0]}" "$RUNNER_TEMP/arus-aligned.apk"
+          "$BT/apksigner" sign --ks "$RUNNER_TEMP/arus-release.jks" --ks-key-alias "$KEY_ALIAS" --ks-pass env:STORE_PASSWORD --key-pass env:KEY_PASSWORD --out dist-apks/arus-release.apk "$RUNNER_TEMP/arus-aligned.apk"
+          "$BT/apksigner" verify --verbose --print-certs dist-apks/arus-release.apk
+          "$BT/zipalign" -c -P 16 -v 4 dist-apks/arus-release.apk
+          python3 scripts/release-manifest.py dist-apks/arus-release.apk "$BT/aapt"
+      - name: Upload verified APK and manifest
         uses: actions/upload-artifact@v4
         with:
-          name: arus-signed-apks
+          name: arus-release-arm64
           path: dist-apks/*
-
-      - name: Create or Update GitHub Release
+          if-no-files-found: error
+      - name: Stage release
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         with:
-          tag_name: ${{ github.ref_name || 'v0.3.0' }}
-          name: Arus ${{ github.ref_name || 'v0.3.0' }} — Local-First Personal Finance
-          body: |
-            ## Arus ${{ github.ref_name || 'v0.3.0' }} — Android APK Release
-            
-            Aplikasi keuangan personal lokal (**100% Local-First**) tanpa backend server perantara.
-            
-            ### Fitur Baru di Rilis Ini:
-            - **Logo Baru Aplikasi**: Ikon resmi Arus (gelombang dinamis hijau & lime) pada launcher Android.
-            - **Notification Listener**: Deteksi instan transaksi GoPay, DANA, OVO, ShopeePay, dan QRIS.
-            - **In-App Auto-Updater**: Periksa dan pasang pembaruan langsung dari dalam aplikasi via tombol di Pengaturan.
-            
-            ### Varian APK:
-            - **`arus-release.apk` (Lightweight / Optimized)**: Versi ramping (~21MB) untuk penggunaan harian.
-            - **`arus-debug.apk` (Developer / Diagnostics)**: Versi debug dengan simbol pelacakan logcat.
-            - **`latest.json`**: Manifest pembaruan otomatis in-app updater.
+          tag_name: ${{ github.ref_name }}
+          name: Arus ${{ github.ref_name }}
+          draft: true
+          generate_release_notes: true
           files: |
-            dist-apks/arus-debug.apk
             dist-apks/arus-release.apk
             dist-apks/latest.json
-          draft: false
-          prerelease: false
+      - name: Publish complete release
+        if: startsWith(github.ref, 'refs/tags/v')
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: gh release edit "$RELEASE_TAG" --draft=false --latest
+      - name: Remove private key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/arus-release.jks"

@@ -1,4 +1,21 @@
 use serde::{Deserialize, Serialize};
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+pub enum SyncRange {
+    #[serde(rename = "7")] Week,
+    #[default]
+    #[serde(rename = "30")] Month,
+    #[serde(rename = "90")] Quarter,
+    #[serde(rename = "all")] All,
+}
+impl SyncRange {
+    pub fn search_query(self, now: chrono::DateTime<chrono::Utc>) -> String {
+        let days = match self { Self::Week => 7, Self::Month => 30, Self::Quarter => 90, Self::All => return "ALL".into() };
+        // IMAP SINCE is inclusive and has calendar-day precision, not rolling hours.
+        let date = (now.with_timezone(&chrono::FixedOffset::east_opt(7 * 3600).unwrap()) - chrono::Duration::days(days)).date_naive();
+        format!("SINCE {}", date.format("%d-%b-%Y"))
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Wallet {
@@ -189,4 +206,3 @@ pub struct ReviewInput {
     pub action: String,
     pub entry: Option<EntryInput>,
 }
-

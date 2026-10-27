@@ -202,9 +202,9 @@ pub async fn check_app_update(app: AppHandle) -> Result<UpdateInfo, String> {
         let _ = app;
         Ok(UpdateInfo {
             available: false,
-            current_version: "1.0.0".to_string(),
+            current_version: app.package_info().version.to_string(),
             current_version_code: 1,
-            latest_version: "1.0.0".to_string(),
+            latest_version: app.package_info().version.to_string(),
             latest_version_code: 1,
             notes: "Mode desktop/browser".to_string(),
             apk_url: "".to_string(),
@@ -214,12 +214,12 @@ pub async fn check_app_update(app: AppHandle) -> Result<UpdateInfo, String> {
 }
 
 #[tauri::command]
-pub async fn download_app_update(app: AppHandle, url: String) -> Result<bool, String> {
+pub async fn download_app_update(app: AppHandle) -> Result<bool, String> {
     #[cfg(target_os = "android")]
     {
         tauri::async_runtime::spawn_blocking(move || -> Result<bool, String> {
             let plugin = app.state::<Native<tauri::Wry>>();
-            let _ = plugin.0.run_mobile_plugin::<Value>("downloadUpdate", json!({ "url": url }))
+            let _ = plugin.0.run_mobile_plugin::<Value>("downloadUpdate", json!({}))
                 .map_err(|e| e.to_string())?;
             Ok(true)
         })
@@ -228,7 +228,7 @@ pub async fn download_app_update(app: AppHandle, url: String) -> Result<bool, St
     }
     #[cfg(not(target_os = "android"))]
     {
-        let _ = (app, url);
+        let _ = app;
         Ok(false)
     }
 }
@@ -251,4 +251,33 @@ pub async fn install_app_update(app: AppHandle) -> Result<bool, String> {
         let _ = app;
         Ok(false)
     }
+}
+
+
+#[tauri::command]
+pub async fn update_install_permission(app: AppHandle) -> Result<bool, String> {
+    #[cfg(target_os = "android")]
+    {
+        tauri::async_runtime::spawn_blocking(move || {
+            let value = app.state::<Native<tauri::Wry>>().0
+                .run_mobile_plugin::<Value>("updateInstallPermission", json!({}))
+                .map_err(|e| e.to_string())?;
+            Ok(value.get("granted").and_then(Value::as_bool).unwrap_or(false))
+        }).await.map_err(|e| e.to_string())?
+    }
+    #[cfg(not(target_os = "android"))]
+    { let _ = app; Ok(false) }
+}
+#[tauri::command]
+pub async fn update_install_settings(app: AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        tauri::async_runtime::spawn_blocking(move || {
+            app.state::<Native<tauri::Wry>>().0
+                .run_mobile_plugin::<Value>("updateInstallSettings", json!({}))
+                .map(|_| ()).map_err(|e| e.to_string())
+        }).await.map_err(|e| e.to_string())?
+    }
+    #[cfg(not(target_os = "android"))]
+    { let _ = app; Err("Pemasangan pembaruan hanya tersedia di Android.".into()) }
 }

@@ -2138,3 +2138,17 @@ body {
   background: var(--paper);
 }
 
+
+
+/* Mobile sheets: native vertical scrolling until an intentional downward drag. */
+.sheet { transition: transform 180ms ease-out; }
+.sheet.is-dragging { animation: none; transition: none; will-change: transform; user-select: none; }
+.sheet-body { min-height: 0; }
+.sheet-handle { width: 64px; height: 24px; margin: 0 auto; background: transparent; position: relative; }
+.sheet-handle::before { content: ""; position: absolute; width: 31px; height: 4px; top: 10px; left: 16px; background: #b8c3b4; border-radius: 8px; }
+.notification-access { display: flex; flex-direction: column; align-items: stretch; gap: 12px; }
+.notification-access > div { min-width: 0; overflow-wrap: anywhere; }
+.notification-access-button { width: 100%; min-height: 44px; justify-content: center; }
+.update-progress { width: 100%; margin: 18px 0; accent-color: var(--green); }
+.update-notes { white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (prefers-reduced-motion: reduce) { .sheet { animation: none; transition: none; } }

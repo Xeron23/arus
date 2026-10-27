@@ -1,4 +1,5 @@
 export type Kind = "expense" | "income" | "transfer";
+export type SyncRange = "7" | "30" | "90" | "all";
 export type Theme = "light" | "dark";
 export interface Wallet {
   id: string;
@@ -161,6 +162,7 @@ export interface FinanceAPI {
   sync(
     accountId: string | null,
     onProgress: (progress: SyncProgress) => void,
+    range?: SyncRange,
   ): Promise<SyncReport>;
   manual(input: EntryInput): Promise<string>;
   deleteEntry(id: string, undo: boolean): Promise<void>;
@@ -174,7 +176,8 @@ export interface FinanceAPI {
   notificationSetEnabled(enabled: boolean): Promise<void>;
   notificationImport(): Promise<number>;
   checkUpdate(): Promise<UpdateInfo>;
-  downloadUpdate(url: string): Promise<boolean>;
+  downloadUpdate(): Promise<boolean>;
+  updateInstallPermission(): Promise<boolean>;
+  updateInstallSettings(): Promise<void>;
   installUpdate(): Promise<boolean>;
 }
-

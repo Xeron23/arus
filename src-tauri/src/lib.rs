@@ -101,6 +101,7 @@ async fn sync_email_transactions(
     state: State<'_, AppState>,
     account_id: Option<String>,
     on_progress: Channel<SyncProgress>,
+    range: Option<SyncRange>,
 ) -> Result<SyncReport> {
     let gate = state.sync_gate.clone();
     let _guard = gate
@@ -137,7 +138,7 @@ async fn sync_email_transactions(
         };
         match imap::sync(&state.db, &a, password, &|p| {
             let _ = on_progress.send(p);
-        })
+        }, range.unwrap_or_default())
         .await
         {
             Ok(r) => {
@@ -248,9 +249,10 @@ pub fn run() {
             notifications::notification_import,
             notifications::check_app_update,
             notifications::download_app_update,
-            notifications::install_app_update
+            notifications::install_app_update,
+            notifications::update_install_permission,
+            notifications::update_install_settings
         ])
         .run(tauri::generate_context!())
         .expect("Tidak dapat memulai aplikasi Arus");
 }
-

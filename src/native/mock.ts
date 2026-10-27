@@ -1,3 +1,4 @@
+import { appVersion } from "../version";
 import type {
   FinanceAPI,
   Snapshot,
@@ -386,6 +387,7 @@ export class MockAPI implements FinanceAPI {
   async sync(
     accountId: string | null,
     onProgress: Parameters<FinanceAPI["sync"]>[1],
+    range: import("../models").SyncRange = "30",
   ): Promise<SyncReport> {
     await this.ready;
     if (this.syncing) throw Error("Sinkronisasi sedang berjalan.");
@@ -409,7 +411,7 @@ export class MockAPI implements FinanceAPI {
       };
       onProgress({
         phase: "connect",
-        message: "Simulasi TLS :993 dan login…",
+        message: `Simulasi email ${range === "all" ? "semua periode" : range + " hari terakhir"}…`,
         accountId: a.id,
         current: 0,
         total: 8,
@@ -422,7 +424,7 @@ export class MockAPI implements FinanceAPI {
           a.autoPost ? "posted" : "review",
           a,
         ),
-        unknown = makeMail("sync-unknown", 185000, "PT ABC 99102", "review", a),
+        unknown = makeMail("sync-unknown", 185000, "PT ABC 99102", a.autoPost ? "posted" : "review", a),
         summary = makeMail(
           "sync-summary",
           45000,
@@ -471,7 +473,7 @@ export class MockAPI implements FinanceAPI {
         e.uid = 1051 + i;
         onProgress({
           phase: "ingest",
-          message: "BODY.PEEK · deduplikasi dua lapis",
+          message: "Mencatat email dan memeriksa duplikat…",
           accountId: a.id,
           current: i + 1,
           total: 8,
@@ -655,15 +657,17 @@ export class MockAPI implements FinanceAPI {
   async checkUpdate() {
     return {
       available: false,
-      currentVersion: "1.0.0",
+      currentVersion: appVersion,
       currentVersionCode: 1,
-      latestVersion: "1.0.0",
+      latestVersion: appVersion,
       latestVersionCode: 1,
       notes: "Mode browser / mock",
       apkUrl: "",
       apkSize: 0,
     };
   }
+  async updateInstallPermission() { return true; }
+  async updateInstallSettings() {}
   async downloadUpdate() {
     return true;
   }
@@ -671,4 +675,3 @@ export class MockAPI implements FinanceAPI {
     return true;
   }
 }
-

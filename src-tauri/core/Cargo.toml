@@ -1,6 +1,6 @@
 [package]
 name = "arus-core"
-version = "1.0.0"
+version = "0.3.2"
 edition = "2021"
 rust-version = "1.88"
 [dependencies]
@@ -24,4 +24,3 @@ thiserror = "2"
 tempfile = "3"
 
 [workspace]
-

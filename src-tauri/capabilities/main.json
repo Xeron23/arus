@@ -3,6 +3,5 @@
   "identifier": "main",
   "description": "Local Arus window, no filesystem or network plugin access from JS",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "core:app:allow-version"]
 }
-

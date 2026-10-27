@@ -22,12 +22,13 @@ class NativeAPI implements FinanceAPI {
     invoke("lock_email_account", { accountId });
   updateAccount: FinanceAPI["updateAccount"] = (input) =>
     invoke("update_email_account", { input });
-  sync: FinanceAPI["sync"] = (accountId, fn) => {
+  sync: FinanceAPI["sync"] = (accountId, fn, range = "30") => {
     const onProgress = new Channel<SyncProgress>();
     onProgress.onmessage = fn;
     return invoke<SyncReport>("sync_email_transactions", {
       accountId,
       onProgress,
+      range,
     });
   };
   manual: FinanceAPI["manual"] = (input) =>
@@ -52,8 +53,9 @@ class NativeAPI implements FinanceAPI {
     invoke<number>("notification_import");
   checkUpdate: FinanceAPI["checkUpdate"] = () =>
     invoke<import("../models").UpdateInfo>("check_app_update");
-  downloadUpdate: FinanceAPI["downloadUpdate"] = (url) =>
-    invoke<boolean>("download_app_update", { url });
+  downloadUpdate: FinanceAPI["downloadUpdate"] = () => invoke<boolean>("download_app_update");
+  updateInstallPermission: FinanceAPI["updateInstallPermission"] = () => invoke<boolean>("update_install_permission");
+  updateInstallSettings: FinanceAPI["updateInstallSettings"] = () => invoke("update_install_settings");
   installUpdate: FinanceAPI["installUpdate"] = () =>
     invoke<boolean>("install_app_update");
 }
@@ -64,4 +66,3 @@ export function errorText(e: unknown): string {
   if (e && typeof e === "object" && "message" in e) return String(e.message);
   return "Operasi belum berhasil. Silakan coba lagi.";
 }
-

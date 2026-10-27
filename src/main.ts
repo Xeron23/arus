@@ -1,3 +1,6 @@
+import { appVersion, loadAppVersion } from "./version";
+import { getSyncRange, setSyncRange, syncRangeOptions } from "./sync-options";
+import { installSheetGesture } from "./sheet-gesture";
 import "./styles.css";
 import { api, errorText } from "./native/client";
 import type {
@@ -62,7 +65,9 @@ let busy = false,
   undo: (() => Promise<void>) | null = null,
   toastTimer: ReturnType<typeof setTimeout>,
   lastFocused: HTMLElement | null = null;
+const resetSheetGesture = installSheetGesture(close);
 function render() {
+  resetSheetGesture();
   document.documentElement.classList.toggle("dark", data.theme === "dark");
   $("#app").innerHTML = shell(view, data, api.native);
 }
@@ -71,6 +76,7 @@ async function refresh() {
   render();
 }
 function close() {
+  resetSheetGesture();
   const o = $("#overlay");
   o?.classList.add("hidden");
   sheetId = "";
@@ -78,6 +84,7 @@ function close() {
   lastFocused = null;
 }
 function sheet(title: string, html: string, subtitle = "") {
+  resetSheetGesture();
   if ($("#overlay").classList.contains("hidden"))
     lastFocused = document.activeElement as HTMLElement;
   $("#sheetHeader").innerHTML =
@@ -247,7 +254,7 @@ function connection(fresh = true) {
   const d = connectionDraft;
   sheet(
     "Hubungkan email",
-    `<div class="notice ${api.native ? "" : "orange"}">${api.native ? "TCP + TLS langsung dari Rust. App Password hanya disimpan di memori sesi; perlu dimasukkan lagi setelah aplikasi ditutup." : "Mode browser: gunakan data contoh. Tidak ada koneksi IMAP nyata dan kredensial tidak disimpan."}</div><form id="connectionForm">${input("email", "Alamat email", d.email, "email", 'required autocomplete="off"')}${select("provider", "Provider", ["Auto", "Gmail", "Outlook", "Yahoo", "Custom"].map((p) => `<option ${p === d.provider ? "selected" : ""}>${p}</option>`).join(""))}${input("password", "Google App Password · 16 huruf", d.password, "password", 'required autocomplete="off" maxlength="40"')}<div class="row between" style="margin-top:8px"><button class="text-btn" type="button" data-act="wizard">Cara membuat App Password ${icon("chevron")}</button>${!api.native ? '<button class="text-btn" type="button" data-act="fill-demo">Isi demo</button>' : ""}</div><div id="customFields" class="${d.provider === "Custom" ? "" : "hidden"}">${input("host", "Host IMAP", d.host, "text", 'placeholder="imap.example.com"')}${input("port", "Port TLS", d.port, "number", 'min="1" max="65535"')}</div>${select("walletId", "Dompet default", walletOptions(data, d.walletId))}<label class="toggle-row"><input type="checkbox" name="autoPost" ${d.autoPost ? "checked" : ""}><span>Auto-post format yang dikenali<small>Opsional. Sender email bukan bukti autentikasi bank; gunakan review untuk setiap mutasi jika ragu.</small></span></label>${
+    `<div class="notice ${api.native ? "" : "orange"}">${api.native ? "TCP + TLS langsung dari Rust. App Password hanya disimpan di memori sesi; perlu dimasukkan lagi setelah aplikasi ditutup." : "Mode browser: gunakan data contoh. Tidak ada koneksi IMAP nyata dan kredensial tidak disimpan."}</div><form id="connectionForm">${input("email", "Alamat email", d.email, "email", 'required autocomplete="off"')}${select("provider", "Provider", ["Auto", "Gmail", "Outlook", "Yahoo", "Custom"].map((p) => `<option ${p === d.provider ? "selected" : ""}>${p}</option>`).join(""))}${input("password", "Google App Password · 16 huruf", d.password, "password", 'required autocomplete="off" maxlength="40"')}<div class="row between" style="margin-top:8px"><button class="text-btn" type="button" data-act="wizard">Cara membuat App Password ${icon("chevron")}</button>${!api.native ? '<button class="text-btn" type="button" data-act="fill-demo">Isi demo</button>' : ""}</div><div id="customFields" class="${d.provider === "Custom" ? "" : "hidden"}">${input("host", "Host IMAP", d.host, "text", 'placeholder="imap.example.com"')}${input("port", "Port TLS", d.port, "number", 'min="1" max="65535"')}</div>${select("walletId", "Dompet default", walletOptions(data, d.walletId))}<label class="toggle-row"><input type="checkbox" name="autoPost" ${d.autoPost ? "checked" : ""}><span>Catat otomatis ke buku kas<small>Aktifkan agar email dengan nominal dan arah transaksi yang jelas langsung tercatat.</small></span></label>${
       !api.native
         ? select(
             "simulation",
@@ -327,7 +334,7 @@ function accountForm(id: string) {
   ];
   sheet(
     "Opsi & mapping email",
-    `<form id="accountForm"><p class="small muted">${esc(a.email)} · ${esc(a.host)}:${a.port}</p>${select("walletId", "Dompet default", walletOptions(data, a.walletId))}<label class="toggle-row"><input type="checkbox" name="enabled" ${a.enabled ? "checked" : ""}><span>Aktifkan sinkronisasi</span></label><label class="toggle-row"><input type="checkbox" name="autoPost" ${a.autoPost ? "checked" : ""}><span>Auto-post format dikenali<small>Matikan agar setiap mutasi dikonfirmasi dahulu.</small></span></label><div class="notice">Mapping pengirim bank mengalahkan dompet default. Untuk top-up GoPay, petakan BCA dan GoPay ke dua dompet milik sendiri.</div>${banks.map((bank) => select("map_" + bank, bank, '<option value="">Ikuti dompet default</option>' + walletOptions(data, a.mappings.find((m) => m.bank === bank)?.walletId || ""))).join("")}${err()}<button class="primary" type="submit" style="margin-top:15px">Simpan mapping</button></form>`,
+    `<form id="accountForm"><p class="small muted">${esc(a.email)} · ${esc(a.host)}:${a.port}</p>${select("walletId", "Dompet default", walletOptions(data, a.walletId))}<label class="toggle-row"><input type="checkbox" name="enabled" ${a.enabled ? "checked" : ""}><span>Aktifkan sinkronisasi</span></label><label class="toggle-row"><input type="checkbox" name="autoPost" ${a.autoPost ? "checked" : ""}><span>Catat otomatis ke buku kas<small>Jika aktif, email dengan nominal dan arah yang jelas langsung tercatat. Matikan untuk memeriksa setiap mutasi dahulu.</small></span></label><div class="notice">Mapping pengirim bank mengalahkan dompet default. Untuk top-up GoPay, petakan BCA dan GoPay ke dua dompet milik sendiri.</div>${banks.map((bank) => select("map_" + bank, bank, '<option value="">Ikuti dompet default</option>' + walletOptions(data, a.mappings.find((m) => m.bank === bank)?.walletId || ""))).join("")}${err()}<button class="primary" type="submit" style="margin-top:15px">Simpan mapping</button></form>`,
   );
 }
 function unlockForm(id: string) {
@@ -363,11 +370,11 @@ async function sync() {
       const inline = $("#syncInline");
       if (inline)
         inline.innerHTML = `<div class="sync-inline"><p class="tiny muted">${esc(p.message)}</p><div class="progress"><span style="width:${p.total ? Math.round((p.current / p.total) * 100) : 10}%"></span></div></div>`;
-    });
+    }, getSyncRange());
     await refresh();
     sheet(
       "Sinkronisasi selesai",
-      `<div class="sync-icon">${icon("check")}</div><h3 class="sync-status">${r.fetched ? "Uangmu semakin tertata." : r.warnings.length ? "Sinkronisasi perlu perhatian." : "Sudah paling baru."}</h3><p class="sync-sub">${r.fetched} email diproses · ${r.remaining} menunggu batch berikut</p><div class="sync-grid"><div class="sync-stat"><b>${r.posted}</b><small>tercatat</small></div><div class="sync-stat"><b>${r.review}</b><small>perlu review</small></div><div class="sync-stat"><b>${r.emailDuplicates + r.ledgerDuplicates}</b><small>duplikat dicegah</small></div></div><div class="card"><div class="detail-line"><span>Message-ID / GMID</span><span>${r.emailDuplicates}</span></div><div class="detail-line"><span>Referensi bank</span><span>${r.ledgerDuplicates}</span></div><div class="detail-line"><span>Diabaikan / error</span><span>${r.ignored} / ${r.errors}</span></div></div>${r.warnings.map((w) => `<div class="notice orange">${esc(w)}</div>`).join("")}${btn("go-review", "Buka kotak review")}${r.remaining ? `<div style="margin-top:10px">${btn("sync", "Lanjutkan batch berikut", "secondary")}</div>` : ""}`,
+      `<div class="sync-icon">${icon("check")}</div><h3 class="sync-status">${r.fetched ? "Uangmu semakin tertata." : r.warnings.length ? "Sinkronisasi perlu perhatian." : "Sudah paling baru."}</h3><p class="sync-sub">${r.fetched} email diproses · ${r.remaining} menunggu batch berikut</p><div class="sync-grid"><div class="sync-stat"><b>${r.posted}</b><small>tercatat</small></div><div class="sync-stat"><b>${r.review}</b><small>perlu review</small></div><div class="sync-stat"><b>${r.emailDuplicates + r.ledgerDuplicates}</b><small>duplikat dicegah</small></div></div><div class="card"><div class="detail-line"><span>Message-ID / GMID</span><span>${r.emailDuplicates}</span></div><div class="detail-line"><span>Referensi bank</span><span>${r.ledgerDuplicates}</span></div><div class="detail-line"><span>Diabaikan / error</span><span>${r.ignored} / ${r.errors}</span></div></div>${r.warnings.map((w) => `<div class="notice orange">${esc(w)}</div>`).join("")}${btn("go-review", "Buka kotak review")}${r.remaining ? `<div style="margin-top:10px">${btn("sync-start", "Lanjutkan batch berikut", "secondary")}</div>` : ""}`,
     );
   } catch (e) {
     await refresh();
@@ -465,8 +472,23 @@ function exportCsv() {
 function showHelp() {
   sheet(
     "Tentang Arus",
-    `<div class="wizard-illustration">${icon("shield")}</div><h3 class="wizard-title">Uangmu, utuh. Di perangkatmu.</h3><div class="notice">${api.native ? "Rust menangani TCP/TLS IMAP dan SQLite dalam sandbox aplikasi. Tidak ada server pengembang." : "Mode mock browser: data contoh di IndexedDB, tanpa koneksi ke email asli."}</div><div class="card"><div class="detail-line"><span>Database native</span><span>SQLite lokal, WAL; belum SQLCipher</span></div><div class="detail-line"><span>App Password</span><span>Memori sesi; tidak ditulis ke disk</span></div><div class="detail-line"><span>IMAP</span><span>EXAMINE, UIDVALIDITY, BODY.PEEK</span></div><div class="detail-line"><span>Parser</span><span>Fallback konservatif; format baru ke Review</span></div><div class="detail-line"><span>Server cloud pengembang</span><span>Tidak ada</span></div></div><p class="small muted">IMAP memerlukan internet untuk terhubung langsung ke provider email. Pada Android, auto-backup perangkat dinonaktifkan oleh konfigurasi build project ini.</p>`,
+    `<div class="wizard-illustration">${icon("shield")}</div><h3 class="wizard-title">Keuangan tertata, privasi terjaga.</h3><p class="small">Arus membantu Anda mencatat pemasukan, pengeluaran, dan perpindahan uang antardompet dalam satu tempat.</p><div class="notice">${api.native ? "Catatan keuangan Anda tersimpan di ponsel dan tidak dikirim ke server pengembang." : "Ini adalah pratinjau dengan data contoh. Email asli tidak dihubungkan."}</div><div class="card"><div class="detail-line"><span>Catatan Anda</span><span>Tersimpan di perangkat</span></div><div class="detail-line"><span>Email</span><span>Tetap belum dibaca</span></div><div class="detail-line"><span>Kata sandi email</span><span>Hanya selama sesi aktif</span></div><div class="detail-line"><span>Versi Arus</span><span>${esc(appVersion)}</span></div></div><p class="small muted">Internet diperlukan saat mengambil email atau memeriksa pembaruan. Lindungi ponsel Anda dan simpan salinan catatan penting sebelum menghapus aplikasi.</p>`,
   );
+}
+function syncOptions() {
+  sheet("Pilih periode email", `<p class="small muted">Pilih email yang ingin diperiksa. Email yang sudah diproses tidak dicatat ulang.</p>${select("syncRange", "Rentang waktu", syncRangeOptions())}<div class="notice">Semua email diproses bertahap, maksimal 200 email per akun dalam satu proses.</div>${btn("sync-start", "Mulai sinkronisasi", "primary")}`);
+}
+let downloadedUpdate = false;
+async function installDownloadedUpdate() {
+  if (!downloadedUpdate) throw Error("Unduh pembaruan terlebih dahulu.");
+  const permission = await api.updateInstallPermission();
+  if (!permission) {
+    await api.updateInstallSettings();
+    toast("Izinkan instalasi dari Arus, lalu kembali dan tekan Pasang lagi.");
+    return;
+  }
+  await api.installUpdate();
+  toast("Konfirmasikan pembaruan pada dialog Android.");
 }
 document.addEventListener("click", async (e) => {
   const el = (e.target as Element).closest<HTMLElement>(
@@ -694,32 +716,37 @@ document.addEventListener("click", async (e) => {
         break;
       }
       case "check-update": {
-        toast("Memeriksa pembaruan di GitHub...");
-        const u = await api.checkUpdate();
-        if (u.available) {
-          sheet(
-            "Pembaruan Tersedia",
-            `<div class="stage-note" style="padding:15px"><div class="badge green">Versi Baru ${esc(u.latestVersion)}</div><h3 style="margin:10px 0 6px">Pembaruan siap dipasang</h3><p class="small muted">${esc(u.notes)}</p><p class="tiny muted" style="margin-top:8px">Ukuran: ${(u.apkSize / (1024 * 1024)).toFixed(1)} MB</p></div><div class="button-row" style="margin-top:15px"><button class="btn primary w-full" data-act="download-update" data-url="${esc(u.apkUrl)}">Unduh & Pasang Pembaruan</button></div>`
-          );
-        } else {
-          toast(`Aplikasi sudah versi terbaru (${u.currentVersion || "v0.2.0"}).`);
-        }
+        busy = true;
+        try {
+          toast("Memeriksa pembaruan…");
+          const u = await api.checkUpdate();
+          downloadedUpdate = false;
+          if (u.available) {
+            sheet("Pembaruan tersedia", `<div class="notice">Arus ${esc(u.latestVersion)} tersedia. Versi terpasang: ${esc(u.currentVersion)}.</div><p class="small update-notes">${esc(u.notes)}</p><p class="tiny muted">Ukuran: ${(u.apkSize / 1048576).toFixed(1)} MB</p>${btn("download-update", "Unduh pembaruan", "primary")}`);
+          } else toast(`Arus ${u.currentVersion || appVersion} sudah versi terbaru.`);
+        } finally { busy = false; }
         break;
       }
       case "download-update": {
-        const url = el.getAttribute("data-url") || "";
-        toast("Mengunduh update APK...");
-        close();
-        const ok = await api.downloadUpdate(url);
-        if (ok) {
-          toast("Unduhan selesai! Membuka installer...");
-          await api.installUpdate();
-        } else {
-          toast("Gagal mengunduh pembaruan.");
-        }
+        busy = true;
+        try {
+          sheet("Mengunduh pembaruan", '<p class="small">Tunggu sampai unduhan dan pemeriksaan selesai.</p><progress class="update-progress" aria-label="Mengunduh pembaruan"></progress>');
+          if (!await api.downloadUpdate()) throw Error("Unduhan belum selesai. Coba lagi.");
+          downloadedUpdate = true;
+          sheet("Pembaruan siap", `<p class="small">Tekan Pasang untuk membuka pemasangan Android. Catatan Anda tetap disimpan oleh aplikasi.</p>${btn("install-update", "Pasang pembaruan", "primary")}`);
+        } catch (error) {
+          sheet("Unduhan belum berhasil", `<div class="notice orange">${esc(errorText(error))}</div>${btn("download-update", "Coba unduh lagi", "primary")}`);
+        } finally { busy = false; }
         break;
       }
+      case "install-update":
+        busy = true;
+        try { await installDownloadedUpdate(); } finally { busy = false; }
+        break;
       case "sync":
+        syncOptions();
+        break;
+      case "sync-start":
         await sync();
         break;
       case "go-review":
@@ -768,6 +795,7 @@ function invalidateConnection() {
 }
 document.addEventListener("change", (e) => {
   const target = e.target as HTMLInputElement | HTMLSelectElement;
+  if (target.id === "syncRange" || target.id === "f-syncRange") setSyncRange(target.value);
   if (target.id === "monthSelect") {
     view.month = target.value;
     render();
@@ -923,8 +951,7 @@ document.addEventListener("keydown", (e) => {
 });
 $("#app").innerHTML =
   '<div class="phone p-6"><div class="skeleton mt-20"></div><p class="text-center muted mt-8">Membuka buku kas lokal…</p></div>';
-refresh().catch((e) => {
+loadAppVersion().catch(() => { /* Package version remains a safe fallback. */ }).then(refresh).catch((e) => {
   $("#app").innerHTML =
     `<div class="p-8"><h1>Arus belum bisa dibuka</h1><p>${esc(errorText(e))}</p><button data-act="reload">Muat ulang</button></div>`;
 });
-

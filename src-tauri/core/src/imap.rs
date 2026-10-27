@@ -222,6 +222,7 @@ pub async fn sync<F: Fn(SyncProgress) + Send + Sync>(
     account: &Account,
     password: Zeroizing<String>,
     progress: &F,
+    range: SyncRange,
 ) -> Result<SyncReport> {
     let ep = endpoint(ConnectionInput {
         email: account.email.clone(),
@@ -253,11 +254,12 @@ pub async fn sync<F: Fn(SyncProgress) + Send + Sync>(
         .map_err(|_| AppError::new("IMAP_CAPABILITY", "Kapabilitas server tidak dapat dibaca."))?;
     let gmail = caps.has_str("X-GM-EXT-1");
     let mut report = SyncReport::default();
+    let search_query = range.search_query(chrono::Utc::now());
     let processing: Result<()> = async {
     for folder in &folders {
         emit(
             "search",
-            format!("Memeriksa folder {folder} · UID incremental"),
+            format!("Memeriksa email pada periode pilihan di {folder}"),
             0,
             0,
         );
@@ -271,18 +273,16 @@ pub async fn sync<F: Fn(SyncProgress) + Send + Sync>(
                 "Server tidak mengembalikan UIDVALIDITY; sync dihentikan untuk melindungi kursor.",
             )
         })?;
-        let last = db.cursor(&account.id, folder, validity)?;
-        if last == u32::MAX {
-            continue;
-        }
+        db.cursor(&account.id, folder, validity)?;
+        // Do not apply a global high-water UID: widening the period needs backfill.
         let found = timeout(
             Duration::from_secs(30),
-            s.uid_search(format!("UID {}:*", last + 1)),
+            s.uid_search(&search_query),
         )
         .await
         .map_err(|_| AppError::new("SEARCH_TIMEOUT", "Pencarian UID habis waktu."))?
         .map_err(|_| AppError::new("IMAP_SEARCH", "Pencarian UID gagal."))?;
-        let mut uids = found.into_iter().filter(|u| *u > last).collect::<Vec<_>>();
+        let mut uids = db.pending_uids(&account.id, folder, validity, found.into_iter().collect())?;
         uids.sort_unstable();
         let total = uids.len() as u32;
         let available = 200u32.saturating_sub(report.fetched) as usize;
@@ -291,7 +291,7 @@ pub async fn sync<F: Fn(SyncProgress) + Send + Sync>(
         for (i, uid) in uids.into_iter().enumerate() {
             emit(
                 "fetch",
-                format!("BODY.PEEK · email {} dari {total}", i + 1),
+                format!("Membaca email {} dari {total}", i + 1),
                 i as u32,
                 total,
             );
@@ -299,6 +299,7 @@ pub async fn sync<F: Fn(SyncProgress) + Send + Sync>(
             if meta.is_none() {
                 // Expunged between SEARCH and FETCH: no email evidence to ingest.
                 let c = db.connection()?;
+                c.execute("INSERT OR IGNORE INTO sync_receipts(account_id,mailbox,uid_validity,uid) VALUES(?1,?2,?3,?4)", rusqlite::params![account.id,folder,validity,uid])?;
                 c.execute("UPDATE cursors SET last_uid=MAX(last_uid,?1) WHERE account_id=?2 AND mailbox=?3",rusqlite::params![uid,account.id,folder])?;
                 continue;
             }
@@ -373,4 +374,3 @@ pub async fn sync<F: Fn(SyncProgress) + Send + Sync>(
     );
     Ok(report)
 }
-

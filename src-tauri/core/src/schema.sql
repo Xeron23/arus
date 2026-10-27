@@ -13,5 +13,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS ledger_email ON ledger(email_id) WHERE email_i
 CREATE INDEX IF NOT EXISTS ledger_occurred ON ledger(occurred_at);
 CREATE TABLE IF NOT EXISTS preferences(key TEXT PRIMARY KEY,value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS audit_log(id INTEGER PRIMARY KEY AUTOINCREMENT,action TEXT NOT NULL,entity_id TEXT NOT NULL,detail TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
-PRAGMA user_version=1;
-
+CREATE TABLE IF NOT EXISTS sync_receipts(
+ account_id TEXT NOT NULL REFERENCES accounts(id), mailbox TEXT NOT NULL,
+ uid_validity INTEGER NOT NULL, uid INTEGER NOT NULL,
+ PRIMARY KEY(account_id,mailbox,uid_validity,uid)
+);
+CREATE INDEX IF NOT EXISTS email_scan_idx ON emails(account_id,mailbox,uid_validity,uid);
+PRAGMA user_version=2;

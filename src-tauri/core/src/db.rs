@@ -410,6 +410,14 @@ impl Database {
         )?;
         Ok(0)
     }
+    /// Filter committed messages, not the global cursor, so broader ranges can backfill.
+    pub fn pending_uids(&self, account: &str, mailbox: &str, validity: u32, candidates: Vec<u32>) -> Result<Vec<u32>> {
+        let c = self.connection()?;
+        let mut q = c.prepare("SELECT uid FROM emails WHERE account_id=?1 AND mailbox=?2 AND uid_validity=?3 UNION SELECT uid FROM sync_receipts WHERE account_id=?1 AND mailbox=?2 AND uid_validity=?3")?;
+        let seen = q.query_map(params![account, mailbox, validity], |r| r.get::<_, u32>(0))?
+            .collect::<std::result::Result<std::collections::HashSet<_>, _>>()?;
+        Ok(candidates.into_iter().filter(|uid| !seen.contains(uid)).collect())
+    }
     pub fn mark_synced(&self, id: &str, folder: &str) -> Result<()> {
         self.connection()?.execute(
             "UPDATE accounts SET last_sync=?1,folder=?2 WHERE id=?3",
@@ -471,6 +479,7 @@ impl Database {
     }
 }
 fn advance(tx: &Transaction<'_>, m: &MailInput) -> Result<()> {
+    tx.execute("INSERT OR IGNORE INTO sync_receipts(account_id,mailbox,uid_validity,uid) VALUES(?1,?2,?3,?4)", params![m.account_id,m.mailbox,m.uid_validity,m.uid])?;
     tx.execute("INSERT INTO cursors(account_id,mailbox,uid_validity,last_uid) VALUES(?1,?2,?3,?4) ON CONFLICT(account_id,mailbox) DO UPDATE SET last_uid=MAX(last_uid,excluded.last_uid),uid_validity=excluded.uid_validity",params![m.account_id,m.mailbox,m.uid_validity,m.uid])?;
     Ok(())
 }
@@ -587,4 +596,3 @@ fn read_wallets(c: &Connection) -> Result<Vec<Wallet>> {
         .collect::<std::result::Result<Vec<_>, _>>()?;
     Ok(rows)
 }
-
