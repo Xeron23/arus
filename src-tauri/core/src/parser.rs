@@ -1,9 +1,10 @@
-//! Local, text-only parser. Explicit amount + direction permit opt-in auto-post.
+//! Conservative, text-only parser. Unsupported real bank layouts go to review.
 use crate::{models::*, Result};
 use chrono::{DateTime, FixedOffset, NaiveDateTime, TimeZone, Utc};
 use mailparse::{MailHeaderMap, ParsedMail};
 use regex::Regex;
 use sha2::{Digest, Sha256};
+use std::sync::OnceLock;
 use uuid::Uuid;
 fn capture(pattern: &str, text: &str) -> Option<String> {
     Regex::new(pattern)
@@ -11,6 +12,50 @@ fn capture(pattern: &str, text: &str) -> Option<String> {
         .captures(text)?
         .get(1)
         .map(|m| m.as_str().trim().to_owned())
+}
+/// Strip transport labels only at the beginning; preserve the actual merchant spelling.
+pub fn clean_merchant(value: &str) -> String {
+    static PREFIX: OnceLock<Regex> = OnceLock::new();
+    let prefix = PREFIX.get_or_init(|| Regex::new(r"(?i)^(?:(?:transaksi\s+)?pembayaran\s+qris(?:\s+(?:ke|kepada))?|transfer\s+(?:ke|dari)|(?:nama\s+)?merchant|(?:nama\s+)?penerima|pengirim|tujuan)(?:\s*[:\-–]\s*|\s+|$)").unwrap());
+    for line in value.lines() {
+        let mut name = line.split_whitespace().collect::<Vec<_>>().join(" ");
+        for _ in 0..8 {
+            let next = prefix.replace(&name, "").trim().to_owned();
+            if next == name {
+                break;
+            }
+            name = next;
+        }
+        if !name.is_empty() {
+            return name;
+        }
+    }
+    String::new()
+}
+/// Empty/placeholder references are not transaction identities.
+pub fn normalize_reference(value: Option<&str>) -> Option<String> {
+    let value = value?.trim().to_uppercase();
+    if value.is_empty()
+        || [
+            "-",
+            "--",
+            "N/A",
+            "NA",
+            "NULL",
+            "NONE",
+            "UNKNOWN",
+            "TIDAK ADA",
+            "NOT AVAILABLE",
+        ]
+        .contains(&value.as_str())
+        || value
+            .chars()
+            .all(|c| c == '0' || c == '-' || c == '/' || c.is_whitespace())
+    {
+        None
+    } else {
+        Some(value)
+    }
 }
 pub fn rupiah(text: &str) -> Option<i64> {
     let v = text
@@ -132,25 +177,6 @@ fn actual_time(text: &str) -> Option<String> {
     }
     None
 }
-fn transaction_amount(text: &str) -> Option<i64> {
-    let label = Regex::new(r"(?i)\b(?:nominal|jumlah|total(?: pembayaran)?|amount)\s*:?\s*((?:Rp\.?\s*|IDR\s*)?[0-9][0-9.,]*)").unwrap();
-    let currency = Regex::new(r"(?i)\b(?:Rp\.?|IDR)\s*([0-9][0-9.,]*)").unwrap();
-    let excluded = Regex::new(r"(?i)\b(?:saldo|balance|limit|biaya admin|biaya transaksi|fee)\b").unwrap();
-    let mut labelled = std::collections::BTreeSet::new();
-    let mut currencies = std::collections::BTreeSet::new();
-    for line in text.lines().filter(|line| !excluded.is_match(line)) {
-        for caps in label.captures_iter(line) {
-            let raw = caps[1].trim().trim_start_matches("IDR").trim_start_matches("idr").trim();
-            if let Some(n) = rupiah(raw.trim_end_matches('.')) { labelled.insert(n); }
-        }
-        for caps in currency.captures_iter(line) {
-            if let Some(n) = rupiah(caps[1].trim_end_matches('.')) { currencies.insert(n); }
-        }
-    }
-    let values = if labelled.is_empty() { currencies } else { labelled };
-    if values.len() == 1 { values.into_iter().next() } else { None }
-}
-
 pub fn parse_message(input: &MailInput, account: &Account) -> Result<EmailRecord> {
     let decoded = mailparse::parse_mail(&input.raw).ok();
     let header = |name: &str| {
@@ -212,27 +238,38 @@ pub fn parse_message(input: &MailInput, account: &Account) -> Result<EmailRecord
             "Email melebihi batas 2 MiB; lampiran tidak diunduh. Periksa di aplikasi email.".into();
         return Ok(e);
     }
-    let bank_name = sender_bank(&e.sender).map(str::to_owned).unwrap_or_else(|| {
-        // Keep unknown senders separate for reference deduplication; no whitelist.
-        capture(r"<([^>]+)>", &e.sender)
-            .unwrap_or_else(|| e.sender.trim().to_lowercase())
-    });
-    let bank = bank_name.as_str();
-    let combined = format!("{}\n{}", e.subject, snippet);
-    let incoming = Regex::new(r"(?i)\b(?:kredit|credit|dikreditkan|credited|dana masuk|uang masuk|transfer masuk|transfer dari|menerima transfer|pembayaran diterima)\b").unwrap().is_match(&combined);
-    let outgoing = Regex::new(r"(?i)\b(?:debit|debet|didebit|didebet|didebitkan|didebetkan|debited|dana keluar|transfer keluar|transfer ke|pembayaran qris|pembayaran berhasil|berhasil membayar|top\s*up)\b").unwrap().is_match(&combined);
-    let blocked = Regex::new(r"(?i)\b(?:gagal|failed|dibatalkan|cancelled|pending|tertunda|menunggu pembayaran|sedang diproses|belum berhasil|belum dibayar|jatuh tempo|promo|diskon|hingga|otp|kode verifikasi)\b").unwrap().is_match(&combined);
-    let amount = transaction_amount(&combined);
-    let direction = incoming != outgoing;
-    let Some(amount) = amount else {
-        e.status = if incoming || outgoing || sender_bank(&e.sender).is_some() { "error" } else { "ignored" }.into();
-        e.reason = "Nominal transaksi belum jelas. Periksa bukti email.".into();
+    let bank = sender_bank(&e.sender).unwrap_or("Unknown");
+    let amount = capture(
+        r"(?im)(?:nominal|jumlah|total(?: pembayaran)?)\s*:?\s*((?:Rp\.?\s*)?[0-9][0-9.,]*)",
+        &snippet,
+    )
+    .and_then(|s| rupiah(&s));
+    if amount.is_none() {
+        if bank != "Unknown"
+            && Regex::new(r"(?i)berhasil|mutasi|transfer|qris|debit|kredit")
+                .unwrap()
+                .is_match(&format!("{} {}", e.subject, snippet))
+        {
+            e.status = "error".into();
+            e.reason = "Notifikasi finansial belum dapat dibaca: nominal tidak ditemukan.".into()
+        } else {
+            e.status = "ignored".into();
+            e.reason = "Promosi / email tanpa mutasi yang dapat dikenali.".into()
+        }
         return Ok(e);
-    };
-    // Unknown or conflicting direction must never silently become an expense.
-    let mut kind = if incoming && !outgoing { "income" } else { "expense" }.to_owned();
-    let merchant = capture(r"(?im)^(?:merchant|penerima|pengirim|pembayaran qris|transfer dari|transfer ke)\s*:?\s*(.+)$", &snippet)
-        .unwrap_or_else(|| if e.subject.trim().is_empty() { "Transaksi email".into() } else { e.subject.chars().take(200).collect() });
+    }
+    let merchant = capture(r"(?im)^(?:nama[ \t]+merchant|merchant|nama[ \t]+penerima|penerima|pengirim|pembayaran[ \t]+qris|transfer[ \t]+dari|transfer[ \t]+ke)[ \t]*:?[ \t]*(?:\r?\n[ \t]*)?([^\r\n]+)",&snippet)
+        .map(|name| clean_merchant(&name)).filter(|name| !name.is_empty())
+        .unwrap_or_else(|| "Merchant belum dikenali".into());
+    let mut kind = if Regex::new(r"(?i)transfer dari|dana masuk|(?:^|\n)kredit")
+        .unwrap()
+        .is_match(&snippet)
+    {
+        "income"
+    } else {
+        "expense"
+    }
+    .to_owned();
     let wallet_id = account
         .mappings
         .iter()
@@ -261,10 +298,11 @@ pub fn parse_message(input: &MailInput, account: &Account) -> Result<EmailRecord
     } else {
         category(&merchant)
     };
-    let reference = capture(
-        r"(?im)(?:no\.?\s*)?(?:referensi|reference|ref|order id|no\.?\s*mutasi)\s*[:#]?\s*([A-Z0-9][A-Z0-9_/-]{3,100})",
+    let raw_reference = capture(
+        r"(?im)^[ \t]*(?:no\.?[ \t]*)?(?:referensi|reference|ref|order[ \t]+id|no\.?[ \t]*mutasi)[ \t]*[:#]?[ \t]*([^\r\n]+)",
         &snippet,
     );
+    let reference = normalize_reference(raw_reference.as_deref());
     let time = actual_time(&snippet);
     let observed = capture(
         r"(?im)saldo akhir\s*:?\s*((?:Rp\.?\s*)?[0-9][0-9.,]*)",
@@ -277,11 +315,20 @@ pub fn parse_message(input: &MailInput, account: &Account) -> Result<EmailRecord
             rupiah(&s)
         }
     });
-    // Missing date/reference/category is no longer an auto-post blocker.
-    let confident = direction && !blocked;
+    let direction = Regex::new(
+        r"(?i)transfer dari|transfer ke|pembayaran qris|top\s*up|(?:^|\n)(?:debit|kredit)",
+    )
+    .unwrap()
+    .is_match(&snippet);
+    let confident = bank != "Unknown"
+        && reference.is_some()
+        && time.is_some()
+        && direction
+        && merchant != "Merchant belum dikenali"
+        && (category != "other" || kind != "expense");
     let p = Parsed {
         bank: bank.into(),
-        amount,
+        amount: amount.unwrap(),
         kind,
         merchant,
         category,
@@ -293,14 +340,14 @@ pub fn parse_message(input: &MailInput, account: &Account) -> Result<EmailRecord
         confident,
     };
     // Sender-domain recognition is NOT authentication. Auto-post is explicit opt-in.
-    if account.enabled && account.auto_post && p.confident {
+    if account.auto_post && p.confident {
         e.status = "posted".into();
-        e.reason = "Tercatat otomatis dari email: nominal dan arah transaksi terbaca.".into()
+        e.reason = "Auto-post opt-in; nominal, arah, referensi dan waktu transaksi terbaca.".into()
     } else {
         e.reason = if !p.confident {
-            "Arah transaksi belum jelas atau pesan bukan transaksi selesai. Periksa bukti email."
+            "Format ambigu / belum dikenali. Periksa nominal, tanggal, dan rekening."
         } else {
-            "Siap dikonfirmasi; pencatatan otomatis atau akun belum aktif."
+            "Siap dikonfirmasi; auto-post akun dinonaktifkan."
         }
         .into()
     }

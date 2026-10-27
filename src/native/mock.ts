@@ -1,4 +1,3 @@
-import { appVersion } from "../version";
 import type {
   FinanceAPI,
   Snapshot,
@@ -8,27 +7,39 @@ import type {
   ConnectionInput,
   ConnectionReport,
   Account,
+  BatchReviewInput,
+  BatchReviewReport,
+  ReviewInput,
   SyncReport,
 } from "../models";
-export const validAmount = (n: number) =>
-  Number.isSafeInteger(n) && n > 0 && n <= 100_000_000_000_000;
+export function cleanMerchant(value: string): string {
+  const prefix =
+    /^(?:(?:transaksi\s+)?pembayaran\s+qris(?:\s+(?:ke|kepada))?|transfer\s+(?:ke|dari)|(?:nama\s+)?merchant|(?:nama\s+)?penerima|pengirim|tujuan)(?:\s*[:\-–]\s*|\s+|$)/i;
+  for (const line of value.split(/\r?\n/)) {
+    let name = line.trim().replace(/\s+/g, " ");
+    for (let i = 0; i < 8; i++) {
+      const next = name.replace(prefix, "").trim();
+      if (next === name) break;
+      name = next;
+    }
+    if (name) return name;
+  }
+  return "";
+}
+export function normalizeReference(value: string | null | undefined): string | null {
+  const ref = value?.trim().toUpperCase();
+  return !ref || ["-", "--", "N/A", "NA", "NULL", "NONE", "UNKNOWN", "TIDAK ADA", "NOT AVAILABLE"].includes(ref) || /^[0\s/-]+$/.test(ref)
+    ? null
+    : ref;
+}
+export const validAmount = (n: number) => Number.isSafeInteger(n) && n > 0 && n <= 100_000_000_000_000;
 export function validateEntry(e: EntryInput, s: Snapshot) {
-  if (
-    !validAmount(e.amount) ||
-    !e.merchant.trim() ||
-    Number.isNaN(Date.parse(e.occurredAt))
-  )
+  if (!validAmount(e.amount) || !e.merchant.trim() || Number.isNaN(Date.parse(e.occurredAt)))
     throw Error("Nominal Rupiah bulat, merchant, dan waktu harus valid.");
-  if (!s.wallets.some((w) => w.id === e.walletId))
-    throw Error("Dompet tidak ditemukan.");
-  if (
-    e.kind === "transfer" &&
-    (!s.wallets.some((w) => w.id === e.toWalletId) ||
-      e.walletId === e.toWalletId)
-  )
+  if (!s.wallets.some((w) => w.id === e.walletId)) throw Error("Dompet tidak ditemukan.");
+  if (e.kind === "transfer" && (!s.wallets.some((w) => w.id === e.toWalletId) || e.walletId === e.toWalletId))
     throw Error("Pilih dompet tujuan yang berbeda.");
-  if (e.kind === "expense" && ["income", "transfer"].includes(e.category))
-    throw Error("Kategori pengeluaran tidak valid.");
+  if (e.kind === "expense" && ["income", "transfer"].includes(e.category)) throw Error("Kategori pengeluaran tidak valid.");
 }
 export function computeWallets(s: Snapshot, deleted: string[] = []) {
   return s.wallets.map((w) => ({
@@ -40,11 +51,7 @@ export function computeWallets(s: Snapshot, deleted: string[] = []) {
         .reduce(
           (n, t) =>
             n +
-            (t.walletId === w.id
-              ? t.kind === "income"
-                ? t.amount
-                : -t.amount
-              : 0) +
+            (t.walletId === w.id ? (t.kind === "income" ? t.amount : -t.amount) : 0) +
             (t.kind === "transfer" && t.toWalletId === w.id ? t.amount : 0),
           0,
         ),
@@ -78,8 +85,7 @@ const day = () =>
   }).format(new Date());
 export function seedSnapshot(): Snapshot {
   const month = day().slice(0, 7);
-  const date = (d: number) =>
-    `${month}-${String(Math.min(d, Number(day().slice(-2)))).padStart(2, "0")}T12:30:00+07:00`;
+  const date = (d: number) => `${month}-${String(Math.min(d, Number(day().slice(-2)))).padStart(2, "0")}T12:30:00+07:00`;
   const wallets = [
     {
       id: "bca",
@@ -122,28 +128,27 @@ export function seedSnapshot(): Snapshot {
       observed: null,
     },
   ];
-  const rows: [string, number, "income" | "expense", string, string, number][] =
-    [
-      ["Gaji bulanan", 10000000, "income", "income", "bca", 1],
-      ["Sewa apartemen", 2600000, "expense", "home", "bca", 2],
-      ["PLN Pascabayar", 425000, "expense", "home", "bca", 3],
-      ["Indomaret", 187500, "expense", "shop", "bca", 4],
-      ["Pertamina", 250000, "expense", "transport", "bca", 5],
-      ["Freelance desain", 2500000, "income", "income", "mandiri", 7],
-      ["Superindo", 365000, "expense", "shop", "mandiri", 9],
-      ["Internet rumah", 350000, "expense", "home", "bca", 10],
-      ["Bakmi GM", 165000, "expense", "food", "bca", 12],
-      ["Kopi Kenangan", 42000, "expense", "food", "gopay", 15],
-      ["Netflix", 186000, "expense", "fun", "bca", 16],
-      ["Alfamart", 89500, "expense", "shop", "bca", 18],
-      ["Makan bersama", 325000, "expense", "food", "bca", 20],
-      ["GrabCar", 78000, "expense", "transport", "gopay", 22],
-      ["Warteg Bahari", 28000, "expense", "food", "cash", 23],
-      ["Tokopedia", 235000, "expense", "shop", "mandiri", 24],
-      ["Kopi Tuku", 46000, "expense", "food", "gopay", 25],
-      ["Indomaret", 67500, "expense", "shop", "bca", 26],
-      ["Nasi goreng Pak Budi", 32000, "expense", "food", "cash", 26],
-    ];
+  const rows: [string, number, "income" | "expense", string, string, number][] = [
+    ["Gaji bulanan", 10000000, "income", "income", "bca", 1],
+    ["Sewa apartemen", 2600000, "expense", "home", "bca", 2],
+    ["PLN Pascabayar", 425000, "expense", "home", "bca", 3],
+    ["Indomaret", 187500, "expense", "shop", "bca", 4],
+    ["Pertamina", 250000, "expense", "transport", "bca", 5],
+    ["Freelance desain", 2500000, "income", "income", "mandiri", 7],
+    ["Superindo", 365000, "expense", "shop", "mandiri", 9],
+    ["Internet rumah", 350000, "expense", "home", "bca", 10],
+    ["Bakmi GM", 165000, "expense", "food", "bca", 12],
+    ["Kopi Kenangan", 42000, "expense", "food", "gopay", 15],
+    ["Netflix", 186000, "expense", "fun", "bca", 16],
+    ["Alfamart", 89500, "expense", "shop", "bca", 18],
+    ["Makan bersama", 325000, "expense", "food", "bca", 20],
+    ["GrabCar", 78000, "expense", "transport", "gopay", 22],
+    ["Warteg Bahari", 28000, "expense", "food", "cash", 23],
+    ["Tokopedia", 235000, "expense", "shop", "mandiri", 24],
+    ["Kopi Tuku", 46000, "expense", "food", "gopay", 25],
+    ["Indomaret", 67500, "expense", "shop", "bca", 26],
+    ["Nasi goreng Pak Budi", 32000, "expense", "food", "cash", 26],
+  ];
   const transactions: LedgerEntry[] = rows.map((r, i) => ({
     id: "seed-" + i,
     merchant: r[0],
@@ -202,13 +207,7 @@ export function seedSnapshot(): Snapshot {
   };
   s.wallets = computeWallets(s);
   s.wallets[0].observed = s.wallets[0].balance - 25000;
-  const em = makeMail(
-    "seed-review",
-    125000,
-    "PT XYZ 009182",
-    "review",
-    accounts[0],
-  );
+  const em = makeMail("seed-review", 125000, "PT XYZ 009182", "review", accounts[0]);
   s.emails.push(em);
   return s;
 }
@@ -234,10 +233,7 @@ function makeMail(
     receivedAt: day() + "T10:43:00+07:00",
     rawSnippet: `Notifikasi BCA\nBERHASIL\nPEMBAYARAN QRIS: ${merchant}\nNominal: Rp${amount.toLocaleString("id-ID")},00\nTanggal: ${day()} 10:42 WIB\nNo. Referensi: ${ref}`,
     status,
-    reason:
-      status === "review"
-        ? "Nama merchant / kategori perlu dikonfirmasi."
-        : "Format valid.",
+    reason: status === "review" ? "Nama merchant / kategori perlu dikonfirmasi." : "Format valid.",
     parsed: {
       bank: "BCA",
       amount,
@@ -264,6 +260,8 @@ export class MockAPI implements FinanceAPI {
   private data: Store;
   private ready: Promise<void>;
   private syncing = false;
+  private reviewing = false;
+  private reviewQueue: Promise<void> = Promise.resolve();
   constructor(private persist = true) {
     this.data = { snapshot: seedSnapshot(), deleted: [], seen: [] };
     this.ready = persist ? this.read() : Promise.resolve();
@@ -283,16 +281,15 @@ export class MockAPI implements FinanceAPI {
       const r = indexedDB.open("arus-browser-demo-v1", 1);
       r.onupgradeneeded = () => r.result.createObjectStore("state");
       r.onsuccess = () => resolve(r.result);
-      r.onerror = () =>
-        reject(Error("Penyimpanan IndexedDB tidak tersedia pada browser ini."));
+      r.onerror = () => reject(Error("Penyimpanan IndexedDB tidak tersedia pada browser ini."));
     });
   }
-  private async save() {
+  private async save(value: Store = this.data) {
     if (!this.persist) return;
     const db = await this.database();
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction("state", "readwrite");
-      tx.objectStore("state").put(this.data, "main");
+      tx.objectStore("state").put(value, "main");
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
       tx.onabort = () => reject(tx.error);
@@ -307,22 +304,15 @@ export class MockAPI implements FinanceAPI {
     return structuredClone({
       ...this.s,
       wallets: computeWallets(this.s, this.data.deleted),
-      transactions: this.s.transactions.filter(
-        (t) => !this.data.deleted.includes(t.id),
-      ),
+      transactions: this.s.transactions.filter((t) => !this.data.deleted.includes(t.id)),
     });
   }
   async test(input: ConnectionInput): Promise<ConnectionReport> {
-    if (
-      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email) ||
-      input.password.replace(/\s/g, "").length !== 16
-    )
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email) || input.password.replace(/\s/g, "").length !== 16)
       throw Error("Gunakan email valid dan App Password demo 16 huruf.");
     await pause(this.persist ? 650 : 0);
-    if (input.simulation === "auth")
-      throw Error("AUTHENTICATION_FAILED · simulasi login ditolak.");
-    if (input.simulation === "timeout")
-      throw Error("TCP_TIMEOUT · simulasi jaringan habis waktu.");
+    if (input.simulation === "auth") throw Error("AUTHENTICATION_FAILED · simulasi login ditolak.");
+    if (input.simulation === "timeout") throw Error("TCP_TIMEOUT · simulasi jaringan habis waktu.");
     const p = input.provider === "Auto" ? "Gmail" : input.provider;
     return {
       host: input.host || "imap.gmail.com",
@@ -384,20 +374,13 @@ export class MockAPI implements FinanceAPI {
     Object.assign(this.s.accounts.find((a) => a.id === input.id)!, input);
     await this.save();
   }
-  async sync(
-    accountId: string | null,
-    onProgress: Parameters<FinanceAPI["sync"]>[1],
-    range: import("../models").SyncRange = "30",
-  ): Promise<SyncReport> {
+  async sync(accountId: string | null, onProgress: Parameters<FinanceAPI["sync"]>[1]): Promise<SyncReport> {
     await this.ready;
-    if (this.syncing) throw Error("Sinkronisasi sedang berjalan.");
+    if (this.syncing || this.reviewing) throw Error("Sinkronisasi atau batch review sedang berjalan.");
     this.syncing = true;
     try {
-      const a = this.s.accounts.find(
-        (a) => a.enabled && a.unlocked && (!accountId || a.id === accountId),
-      );
-      if (!a)
-        throw Error("Aktifkan dan buka sesi satu akun email terlebih dahulu.");
+      const a = this.s.accounts.find((a) => a.enabled && a.unlocked && (!accountId || a.id === accountId));
+      if (!a) throw Error("Aktifkan dan buka sesi satu akun email terlebih dahulu.");
       const r: SyncReport = {
         fetched: 8,
         posted: 0,
@@ -411,44 +394,19 @@ export class MockAPI implements FinanceAPI {
       };
       onProgress({
         phase: "connect",
-        message: `Simulasi email ${range === "all" ? "semua periode" : range + " hari terakhir"}…`,
+        message: "Simulasi TLS :993 dan login…",
         accountId: a.id,
         current: 0,
         total: 8,
       });
       await pause(this.persist ? 500 : 0);
-      const coffee = makeMail(
-          "sync-kopi",
-          45000,
-          "Kopi Nusa",
-          a.autoPost ? "posted" : "review",
-          a,
-        ),
-        unknown = makeMail("sync-unknown", 185000, "PT ABC 99102", a.autoPost ? "posted" : "review", a),
-        summary = makeMail(
-          "sync-summary",
-          45000,
-          "Kopi Nusa",
-          a.autoPost ? "posted" : "review",
-          a,
-          coffee.parsed!.reference!,
-        ),
+      const coffee = makeMail("sync-kopi", 45000, "Kopi Nusa", a.autoPost ? "posted" : "review", a),
+        unknown = makeMail("sync-unknown", 185000, "PT ABC 99102", "review", a),
+        summary = makeMail("sync-summary", 45000, "Kopi Nusa", a.autoPost ? "posted" : "review", a, coffee.parsed!.reference!),
         promo = makeMail("sync-promo", 0, "Promo", "ignored", a),
         err = makeMail("sync-error", 0, "Format baru", "error", a),
-        transfer = makeMail(
-          "sync-transfer",
-          150000,
-          "Top up GoPay",
-          "review",
-          a,
-        ),
-        income = makeMail(
-          "sync-income",
-          350000,
-          "Pengembalian dana",
-          a.autoPost ? "posted" : "review",
-          a,
-        );
+        transfer = makeMail("sync-transfer", 150000, "Top up GoPay", "review", a),
+        income = makeMail("sync-income", 350000, "Pengembalian dana", a.autoPost ? "posted" : "review", a);
       promo.parsed = null;
       err.parsed = null;
       promo.rawSnippet = "Promo diskon 20%";
@@ -458,22 +416,13 @@ export class MockAPI implements FinanceAPI {
       transfer.parsed!.toWalletId = "gopay";
       income.parsed!.kind = "income";
       income.parsed!.category = "income";
-      const feed = [
-        coffee,
-        unknown,
-        summary,
-        { ...coffee },
-        promo,
-        err,
-        transfer,
-        income,
-      ];
+      const feed = [coffee, unknown, summary, { ...coffee }, promo, err, transfer, income];
       for (let i = 0; i < feed.length; i++) {
         const e = feed[i];
         e.uid = 1051 + i;
         onProgress({
           phase: "ingest",
-          message: "Mencatat email dan memeriksa duplikat…",
+          message: "BODY.PEEK · deduplikasi dua lapis",
           accountId: a.id,
           current: i + 1,
           total: 8,
@@ -486,10 +435,7 @@ export class MockAPI implements FinanceAPI {
         if (
           e.parsed?.reference &&
           this.s.transactions.some(
-            (t) =>
-              t.reference === e.parsed!.reference &&
-              t.walletId === e.parsed!.walletId &&
-              t.bank === e.parsed!.bank,
+            (t) => t.reference === e.parsed!.reference && t.walletId === e.parsed!.walletId && t.bank === e.parsed!.bank,
           )
         ) {
           e.status = "duplicate";
@@ -521,12 +467,7 @@ export class MockAPI implements FinanceAPI {
       this.s.transactions.unshift({
         ...p,
         id: id(),
-        category:
-          p.kind === "income"
-            ? "income"
-            : p.kind === "transfer"
-              ? "transfer"
-              : p.category,
+        category: p.kind === "income" ? "income" : p.kind === "transfer" ? "transfer" : p.category,
         source: "Email",
         emailId: e.id,
         bank: e.parsed?.bank || "Unknown",
@@ -553,36 +494,55 @@ export class MockAPI implements FinanceAPI {
     await this.ready;
     const t = this.s.transactions.find((t) => t.id === key);
     if (!t) throw Error("Transaksi tidak ditemukan.");
-    this.data.deleted = undo
-      ? this.data.deleted.filter((x) => x !== key)
-      : [...new Set([...this.data.deleted, key])];
+    this.data.deleted = undo ? this.data.deleted.filter((x) => x !== key) : [...new Set([...this.data.deleted, key])];
     const e = this.s.emails.find((e) => e.id === t.emailId);
     if (e) e.status = undo ? "posted" : "ignored";
     await this.save();
   }
-  async resolve(input: Parameters<FinanceAPI["resolve"]>[0]) {
+  async resolve(input: ReviewInput) {
+    await this.batchResolve({ items: [input] });
+  }
+  batchResolve(input: BatchReviewInput): Promise<BatchReviewReport> {
+    const task = this.reviewQueue.then(() => this.commitReviews(input));
+    this.reviewQueue = task.then(
+      () => undefined,
+      () => undefined,
+    );
+    return task;
+  }
+  private async commitReviews(input: BatchReviewInput): Promise<BatchReviewReport> {
     await this.ready;
-    const e = this.s.emails.find((e) => e.id === input.emailId);
-    if (!e || !["review", "error"].includes(e.status))
-      throw Error("Email sudah diproses.");
-    if (input.action === "ignore") e.status = "ignored";
-    else {
-      if (!input.entry) throw Error("Lengkapi data transaksi.");
-      const p = input.entry;
-      if (
-        e.parsed?.reference &&
-        this.s.transactions.some(
-          (t) =>
-            t.reference === e.parsed!.reference &&
-            t.walletId === p.walletId &&
-            t.bank === e.parsed!.bank &&
-            t.emailId !== e.id,
-        )
-      )
-        throw Error("Referensi ini sudah tercatat.");
-      this.post(e, p);
+    if (this.syncing) throw Error("Tunggu sinkronisasi selesai.");
+    if (!input.items.length || input.items.length > 2000) throw Error("Batch harus berisi 1–2000 email.");
+    if (new Set(input.items.map((r) => r.emailId)).size !== input.items.length)
+      throw Error("Email yang sama tidak boleh muncul dua kali dalam satu batch.");
+    this.reviewing = true;
+    try {
+      const staged = structuredClone(this.data);
+      const report: BatchReviewReport = {
+        requested: input.items.length,
+        posted: 0,
+        updated: 0,
+        ignored: 0,
+        duplicates: 0,
+        unchanged: 0,
+        referenceConflicts: 0,
+      };
+      for (const r of input.items) {
+        try {
+          const result = applyReview(staged, r);
+          report[result.kind]++;
+          if (result.detached) report.referenceConflicts++;
+        } catch (e) {
+          throw Error(`Email ${r.emailId}: ${e instanceof Error ? e.message : String(e)} Seluruh batch dibatalkan.`);
+        }
+      }
+      await this.save(staged);
+      this.data = staged;
+      return report;
+    } finally {
+      this.reviewing = false;
     }
-    await this.save();
   }
   async undoReview(key: string) {
     await this.ready;
@@ -594,12 +554,7 @@ export class MockAPI implements FinanceAPI {
   }
   async wallet(input: Parameters<FinanceAPI["wallet"]>[0]) {
     await this.ready;
-    if (
-      input.opening < 0 ||
-      !Number.isSafeInteger(input.opening) ||
-      !input.name.trim()
-    )
-      throw Error("Isi nama dan saldo awal yang valid.");
+    if (input.opening < 0 || !Number.isSafeInteger(input.opening) || !input.name.trim()) throw Error("Isi nama dan saldo awal yang valid.");
     let w = this.s.wallets.find((w) => w.id === input.id);
     const key = w?.id || id();
     if (w) Object.assign(w, input);
@@ -615,11 +570,8 @@ export class MockAPI implements FinanceAPI {
   }
   async reconcile(key: string, observed: number, adjust: boolean) {
     await this.ready;
-    if (!Number.isSafeInteger(observed) || observed < 0)
-      throw Error("Saldo pembanding tidak valid.");
-    const w = computeWallets(this.s, this.data.deleted).find(
-      (w) => w.id === key,
-    )!;
+    if (!Number.isSafeInteger(observed) || observed < 0) throw Error("Saldo pembanding tidak valid.");
+    const w = computeWallets(this.s, this.data.deleted).find((w) => w.id === key)!;
     this.s.wallets.find((w) => w.id === key)!.observed = observed;
     if (adjust && observed !== w.balance) {
       const diff = observed - w.balance;
@@ -641,37 +593,78 @@ export class MockAPI implements FinanceAPI {
     this.s.theme = theme;
     await this.save();
   }
-  async notificationStatus() {
-    return {
-      granted: true,
-      enabled: true,
-      connected: true,
-      lastError: "",
-    };
+}
+
+function applyReview(
+  store: Store,
+  r: ReviewInput,
+): { kind: "posted" | "updated" | "ignored" | "duplicates" | "unchanged"; detached: boolean } {
+  if (!["post", "ignore"].includes(r.action)) throw Error("Aksi review tidak dikenal.");
+  const s = store.snapshot,
+    e = s.emails.find((e) => e.id === r.emailId);
+  if (!e) throw Error("Email tidak ditemukan.");
+  const own = s.transactions.find((t) => t.emailId === e.id);
+  if (!["review", "error"].includes(e.status) && !(r.action === "post" && e.status === "posted" && own))
+    return { kind: "unchanged", detached: false };
+  if (r.action === "ignore") {
+    e.status = "ignored";
+    e.reason = "Diabaikan pengguna";
+    return { kind: "ignored", detached: false };
   }
-  async notificationOpenSettings() {}
-  async notificationSetEnabled() {}
-  async notificationImport() {
-    return 0;
+  const parsed = e.parsed;
+  const p: EntryInput = r.entry
+    ? { ...r.entry }
+    : parsed
+      ? { ...parsed, note: "Dikonfirmasi dari review email" }
+      : (() => {
+          throw Error("Data parser belum lengkap. Lengkapi audit terlebih dahulu.");
+        })();
+  p.merchant = cleanMerchant(p.merchant);
+  p.toWalletId = p.kind === "transfer" ? p.toWalletId : null;
+  p.category =
+    p.kind === "income"
+      ? "income"
+      : p.kind === "transfer"
+        ? "transfer"
+        : !r.entry && p.category === "other"
+          ? classifyMerchant(p.merchant)
+          : p.category;
+  validateEntry(p, s);
+  const bank = parsed?.bank || "Unknown",
+    original = normalizeReference(parsed?.reference);
+  const conflicts = original
+    ? s.transactions.filter(
+        (t) =>
+          t.id !== own?.id &&
+          t.walletId === p.walletId &&
+          t.bank.toLowerCase() === bank.toLowerCase() &&
+          normalizeReference(t.reference || s.emails.find((e) => e.id === t.emailId)?.parsed?.reference) === original,
+      )
+    : [];
+  const same = conflicts.find(
+    (t) =>
+      t.amount === p.amount &&
+      t.kind === p.kind &&
+      (t.kind !== "transfer" || t.toWalletId === p.toWalletId) &&
+      cleanMerchant(t.merchant).toLowerCase() === p.merchant.toLowerCase() &&
+      Number.isFinite(Date.parse(t.occurredAt)) &&
+      Date.parse(t.occurredAt) === Date.parse(p.occurredAt),
+  );
+  if (!own && same) {
+    e.status = "duplicate";
+    e.reason = `Bukti transaksi identik dengan ledger ${same.id}; saldo tidak dicatat dua kali.`;
+    return { kind: "duplicates", detached: false };
   }
-  async checkUpdate() {
-    return {
-      available: false,
-      currentVersion: appVersion,
-      currentVersionCode: 1,
-      latestVersion: appVersion,
-      latestVersionCode: 1,
-      notes: "Mode browser / mock",
-      apkUrl: "",
-      apkSize: 0,
-    };
-  }
-  async updateInstallPermission() { return true; }
-  async updateInstallSettings() {}
-  async downloadUpdate() {
-    return true;
-  }
-  async installUpdate() {
-    return true;
-  }
+  const detached = conflicts.length > 0;
+  const values = { ...p, source: "Email" as const, bank, reference: detached ? null : original, emailId: e.id };
+  if (own) {
+    Object.assign(own, values);
+    store.deleted = store.deleted.filter((id) => id !== own.id);
+  } else s.transactions.unshift({ ...values, id: id() });
+  e.status = "posted";
+  e.reason = detached
+    ? "Dikonfirmasi. Referensi bentrok disimpan pada bukti email; mutasi dicatat terpisah."
+    : "Dikonfirmasi dan dikoreksi pengguna";
+  e.parsed = { ...p, bank, reference: original, observed: parsed?.observed ?? null, confident: parsed?.confident ?? false };
+  return { kind: own ? "updated" : "posted", detached };
 }
