@@ -178,7 +178,7 @@ pub async fn test(input: ConnectionInput) -> Result<ConnectionReport> {
 pub async fn test_endpoint(ep: &Endpoint) -> Result<ConnectionReport> {
     let start = Instant::now();
     let mut s = connect(ep).await?;
-    // Only examine INBOX for rapid TLS connection verification (1-2s) instead of looping all archive folders
+    // Fast examine of INBOX only for rapid TLS connection verification (1-2s)
     timeout(Duration::from_secs(10), s.examine("INBOX"))
         .await
         .map_err(|_| AppError::new("EXAMINE_TIMEOUT", "Membaca metadata folder habis waktu."))?

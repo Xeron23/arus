@@ -1,8 +1,18 @@
-import "./styles.css";
-import { api, errorText } from "./native/client";
-import type { Snapshot, Kind, EntryInput, ConnectionInput, ConnectionReport, SyncProgress, ReviewInput, AccountUpdate } from "./models";
+import { appVersion, loadAppVersion } from "./version";
 import { getSyncRange, setSyncRange, syncRangeOptions } from "./sync-options";
 import { installSheetGesture } from "./sheet-gesture";
+import "./styles.css";
+import { api, errorText } from "./native/client";
+import type {
+  Snapshot,
+  Kind,
+  EntryInput,
+  ConnectionInput,
+  ConnectionReport,
+  SyncProgress,
+  ReviewInput,
+  AccountUpdate,
+} from "./models";
 import {
   shell,
   esc,
@@ -24,8 +34,9 @@ import {
   type Page,
 } from "./ui/templates";
 import { icon } from "./ui/icons";
-import { classifyMerchant, cleanMerchant } from "./native/mock";
-const $ = <T extends Element = HTMLElement>(s: string) => document.querySelector<T>(s)!;
+import { classifyMerchant } from "./native/mock";
+const $ = <T extends Element = HTMLElement>(s: string) =>
+  document.querySelector<T>(s)!;
 let data: Snapshot = {
   wallets: [],
   transactions: [],
@@ -42,9 +53,6 @@ const view: View = {
   kind: "all",
   status: "review",
   hidden: false,
-  selectionMode: false,
-  selectedIds: new Set<string>(),
-  reviewBusy: false,
 };
 let busy = false,
   sheetId = "",
@@ -57,20 +65,18 @@ let busy = false,
   undo: (() => Promise<void>) | null = null,
   toastTimer: ReturnType<typeof setTimeout>,
   lastFocused: HTMLElement | null = null;
-function render(preserveScroll = false) {
-  const y = preserveScroll ? $("#content")?.scrollTop || 0 : 0;
+const resetSheetGesture = installSheetGesture(close);
+function render() {
+  resetSheetGesture();
   document.documentElement.classList.toggle("dark", data.theme === "dark");
   $("#app").innerHTML = shell(view, data, api.native);
-  $("#content").scrollTop = y;
 }
 async function refresh() {
   data = await api.snapshot();
-  const pending = new Set(data.emails.filter((e) => e.status === "review").map((e) => e.id));
-  view.selectedIds = new Set([...(view.selectedIds || [])].filter((id) => pending.has(id)));
-  if (!pending.size) view.selectionMode = false;
   render();
 }
 function close() {
+  resetSheetGesture();
   const o = $("#overlay");
   o?.classList.add("hidden");
   sheetId = "";
@@ -78,7 +84,9 @@ function close() {
   lastFocused = null;
 }
 function sheet(title: string, html: string, subtitle = "") {
-  if ($("#overlay").classList.contains("hidden")) lastFocused = document.activeElement as HTMLElement;
+  resetSheetGesture();
+  if ($("#overlay").classList.contains("hidden"))
+    lastFocused = document.activeElement as HTMLElement;
   $("#sheetHeader").innerHTML =
     `<div><h2 id="sheetTitle">${esc(title)}</h2>${subtitle ? `<p>${esc(subtitle)}</p>` : ""}</div>${btn("close", icon("close"), "icon-btn")}`;
   $("#sheetBody").innerHTML = html;
@@ -105,14 +113,21 @@ function fail(e: unknown) {
   if (p) p.textContent = errorText(e);
   else toast(errorText(e));
 }
-function input(name: string, label: string, value: unknown = "", type = "text", attrs = "") {
+function input(
+  name: string,
+  label: string,
+  value: unknown = "",
+  type = "text",
+  attrs = "",
+) {
   return `<label class="field" for="f-${name}">${label}</label><input class="field" type="${type}" id="f-${name}" name="${name}" value="${esc(value)}" ${attrs}>`;
 }
 function select(name: string, label: string, options: string) {
   return `<label class="field" for="f-${name}">${label}</label><select class="field" name="${name}" id="f-${name}">${options}</select>`;
 }
 const err = () => '<p class="error-message" id="formError" role="alert"></p>';
-const entries = (f: HTMLFormElement) => Object.fromEntries(new FormData(f).entries()) as Record<string, string>;
+const entries = (f: HTMLFormElement) =>
+  Object.fromEntries(new FormData(f).entries()) as Record<string, string>;
 function entryFrom(d: Record<string, string>): EntryInput {
   return {
     walletId: d.walletId,
@@ -120,7 +135,12 @@ function entryFrom(d: Record<string, string>): EntryInput {
     kind: d.kind as Kind,
     amount: Number(d.amount),
     merchant: d.merchant.trim(),
-    category: d.kind === "income" ? "income" : d.kind === "transfer" ? "transfer" : d.category,
+    category:
+      d.kind === "income"
+        ? "income"
+        : d.kind === "transfer"
+          ? "transfer"
+          : d.category,
     occurredAt: d.occurredAt + ":00+07:00",
     note: d.note || "",
   };
@@ -146,7 +166,8 @@ function manual(kind: Kind = "expense", keep = false) {
       ["transfer", "Transfer"],
     ]
       .map(
-        ([k, n]) => `<button type="button" class="${formKind === k ? "active" : ""}" data-act="manual-kind" data-id="${k}">${n}</button>`,
+        ([k, n]) =>
+          `<button type="button" class="${formKind === k ? "active" : ""}" data-act="manual-kind" data-id="${k}">${n}</button>`,
       )
       .join(
         "",
@@ -158,7 +179,7 @@ function transaction(id: string) {
   sheetId = id;
   sheet(
     "Detail transaksi",
-    `<div class="detail-amount ${t.kind === "income" ? "income" : ""}">${t.kind === "income" ? "+" : t.kind === "expense" ? "−" : ""}${money(t.amount)}</div><div class="detail-merchant">${esc(t.source === "Email" ? cleanMerchant(t.merchant) : t.merchant)}</div><div class="card">${[["Jenis", t.kind === "transfer" ? "Transfer internal" : t.kind === "income" ? "Pemasukan" : "Pengeluaran"], ["Kategori", cats[t.category]?.name || "Lainnya"], ["Dompet", walletName(data, t.walletId)], ...(t.toWalletId ? [["Tujuan", walletName(data, t.toWalletId)]] : []), ["Waktu aktual", dateText(t.occurredAt) + " WIB"], ["Sumber", t.source], ["Referensi", t.reference || "Manual"], ["Catatan", t.note || "—"]].map(([k, v]) => `<div class="detail-line"><span>${k}</span><span>${esc(v)}</span></div>`).join("")}</div>${t.emailId ? btn("audit", icon("mail") + " Lihat bukti email", "secondary", t.emailId) : ""}<div style="margin-top:12px">${btn("delete-entry", icon("trash") + " Hapus transaksi", "danger-btn", id)}</div>`,
+    `<div class="detail-amount ${t.kind === "income" ? "income" : ""}">${t.kind === "income" ? "+" : t.kind === "expense" ? "−" : ""}${money(t.amount)}</div><div class="detail-merchant">${esc(t.merchant)}</div><div class="card">${[["Jenis", t.kind === "transfer" ? "Transfer internal" : t.kind === "income" ? "Pemasukan" : "Pengeluaran"], ["Kategori", cats[t.category]?.name || "Lainnya"], ["Dompet", walletName(data, t.walletId)], ...(t.toWalletId ? [["Tujuan", walletName(data, t.toWalletId)]] : []), ["Waktu aktual", dateText(t.occurredAt) + " WIB"], ["Sumber", t.source], ["Referensi", t.reference || "Manual"], ["Catatan", t.note || "—"]].map(([k, v]) => `<div class="detail-line"><span>${k}</span><span>${esc(v)}</span></div>`).join("")}</div>${t.emailId ? btn("audit", icon("mail") + " Lihat bukti email", "secondary", t.emailId) : ""}<div style="margin-top:12px">${btn("delete-entry", icon("trash") + " Hapus transaksi", "danger-btn", id)}</div>`,
   );
 }
 function audit(id: string) {
@@ -168,8 +189,11 @@ function audit(id: string) {
     canEdit = ["review", "error"].includes(e.status);
   const d = {
     amount: String(p?.amount || ""),
-    merchant: cleanMerchant(p?.merchant || ""),
-    walletId: p?.walletId || data.accounts.find((a) => a.id === e.accountId)?.walletId || data.wallets[0].id,
+    merchant: p?.merchant || "",
+    walletId:
+      p?.walletId ||
+      data.accounts.find((a) => a.id === e.accountId)?.walletId ||
+      data.wallets[0].id,
     toWalletId: p?.toWalletId || "gopay",
     category: p?.category || "other",
     occurredAt: localTime(p?.occurredAt || e.receivedAt),
@@ -185,7 +209,10 @@ function audit(id: string) {
       ["UIDVALIDITY", String(e.uidValidity)],
       ["Folder", e.mailbox],
     ]
-      .map(([k, v]) => `<div class="detail-line"><span>${k}</span><span>${esc(v)}</span></div>`)
+      .map(
+        ([k, v]) =>
+          `<div class="detail-line"><span>${k}</span><span>${esc(v)}</span></div>`,
+      )
       .join(
         "",
       )}<div class="audit-heading">${icon("shield")}Bukti email · hanya teks</div><pre class="raw-email">${esc(e.rawSnippet)}</pre><p class="tiny muted">${esc(e.reason)}</p>${canEdit ? `<form id="reviewForm"><div class="section-title"><h2>Koreksi sebelum dicatat</h2></div>${select("reviewKind", "Jenis mutasi", ["expense", "income", "transfer"].map((k) => `<option value="${k}" ${(p?.kind || "expense") === k ? "selected" : ""}>${k === "expense" ? "Keluar" : k === "income" ? "Masuk" : "Transfer internal"}</option>`).join(""))}<div id="reviewFields">${entryFields(d, p?.kind || "expense")}</div>${err()}<button class="primary" type="submit">${icon("check")}Konfirmasi & catat</button><div style="margin-top:9px">${btn("ignore-email", "Abaikan email", "secondary", id)}</div></form>` : `<div class="notice">Email ini ${e.status === "posted" ? "sudah tercatat" : "tidak mengubah saldo"}.</div>`}`,
@@ -227,7 +254,7 @@ function connection(fresh = true) {
   const d = connectionDraft;
   sheet(
     "Hubungkan email",
-    `<div class="notice ${api.native ? "" : "orange"}">${api.native ? "TCP + TLS langsung dari Rust. App Password hanya disimpan di memori sesi; perlu dimasukkan lagi setelah aplikasi ditutup." : "Mode browser: gunakan data contoh. Tidak ada koneksi IMAP nyata dan kredensial tidak disimpan."}</div><form id="connectionForm">${input("email", "Alamat email", d.email, "email", 'required autocomplete="off"')}${select("provider", "Provider", ["Auto", "Gmail", "Outlook", "Yahoo", "Custom"].map((p) => `<option ${p === d.provider ? "selected" : ""}>${p}</option>`).join(""))}${input("password", "Google App Password · 16 huruf", d.password, "password", 'required autocomplete="off" maxlength="40"')}<div class="row between" style="margin-top:8px"><button class="text-btn" type="button" data-act="wizard">Cara membuat App Password ${icon("chevron")}</button>${!api.native ? '<button class="text-btn" type="button" data-act="fill-demo">Isi demo</button>' : ""}</div><div id="customFields" class="${d.provider === "Custom" ? "" : "hidden"}">${input("host", "Host IMAP", d.host, "text", 'placeholder="imap.example.com"')}${input("port", "Port TLS", d.port, "number", 'min="1" max="65535"')}</div>${select("walletId", "Dompet default", walletOptions(data, d.walletId))}<label class="toggle-row"><input type="checkbox" name="autoPost" ${d.autoPost ? "checked" : ""}><span>Auto-post format yang dikenali<small>Opsional. Sender email bukan bukti autentikasi bank; gunakan review untuk setiap mutasi jika ragu.</small></span></label>${
+    `<div class="notice ${api.native ? "" : "orange"}">${api.native ? "TCP + TLS langsung dari Rust. App Password hanya disimpan di memori sesi; perlu dimasukkan lagi setelah aplikasi ditutup." : "Mode browser: gunakan data contoh. Tidak ada koneksi IMAP nyata dan kredensial tidak disimpan."}</div><form id="connectionForm">${input("email", "Alamat email", d.email, "email", 'required autocomplete="off"')}${select("provider", "Provider", ["Auto", "Gmail", "Outlook", "Yahoo", "Custom"].map((p) => `<option ${p === d.provider ? "selected" : ""}>${p}</option>`).join(""))}${input("password", "Google App Password · 16 huruf", d.password, "password", 'required autocomplete="off" maxlength="40"')}<div class="row between" style="margin-top:8px"><button class="text-btn" type="button" data-act="wizard">Cara membuat App Password ${icon("chevron")}</button>${!api.native ? '<button class="text-btn" type="button" data-act="fill-demo">Isi demo</button>' : ""}</div><div id="customFields" class="${d.provider === "Custom" ? "" : "hidden"}">${input("host", "Host IMAP", d.host, "text", 'placeholder="imap.example.com"')}${input("port", "Port TLS", d.port, "number", 'min="1" max="65535"')}</div>${select("walletId", "Dompet default", walletOptions(data, d.walletId))}<label class="toggle-row"><input type="checkbox" name="autoPost" ${d.autoPost ? "checked" : ""}><span>Catat otomatis ke buku kas<small>Aktifkan agar email dengan nominal dan arah transaksi yang jelas langsung tercatat.</small></span></label>${
       !api.native
         ? select(
             "simulation",
@@ -237,7 +264,10 @@ function connection(fresh = true) {
               ["auth", "Autentikasi gagal"],
               ["timeout", "Timeout"],
             ]
-              .map(([k, n]) => `<option value="${k}" ${d.simulation === k ? "selected" : ""}>${n}</option>`)
+              .map(
+                ([k, n]) =>
+                  `<option value="${k}" ${d.simulation === k ? "selected" : ""}>${n}</option>`,
+              )
               .join(""),
           )
         : ""
@@ -264,7 +294,11 @@ function wizard() {
       "Aktifkan Verifikasi 2 Langkah",
       "Buka Akun Google → Keamanan. Aktifkan Verifikasi 2 Langkah dan selesaikan verifikasi akun.",
     ],
-    ["lock", "Buat sandi aplikasi", "Buka myaccount.google.com/apppasswords. Beri nama “Arus Mobile”, lalu buat App Password khusus."],
+    [
+      "lock",
+      "Buat sandi aplikasi",
+      "Buka myaccount.google.com/apppasswords. Beri nama “Arus Mobile”, lalu buat App Password khusus.",
+    ],
     [
       "mail",
       "Salin 16 huruf",
@@ -285,10 +319,22 @@ function wizard() {
 function accountForm(id: string) {
   const a = data.accounts.find((a) => a.id === id)!;
   sheetId = id;
-  const banks = ["BCA", "Mandiri", "BRI", "BNI", "Jenius", "Bank Jago", "Seabank", "GoPay", "DANA", "OVO", "ShopeePay"];
+  const banks = [
+    "BCA",
+    "Mandiri",
+    "BRI",
+    "BNI",
+    "Jenius",
+    "Bank Jago",
+    "Seabank",
+    "GoPay",
+    "DANA",
+    "OVO",
+    "ShopeePay",
+  ];
   sheet(
     "Opsi & mapping email",
-    `<form id="accountForm"><p class="small muted">${esc(a.email)} · ${esc(a.host)}:${a.port}</p>${select("walletId", "Dompet default", walletOptions(data, a.walletId))}<label class="toggle-row"><input type="checkbox" name="enabled" ${a.enabled ? "checked" : ""}><span>Aktifkan sinkronisasi</span></label><label class="toggle-row"><input type="checkbox" name="autoPost" ${a.autoPost ? "checked" : ""}><span>Auto-post format dikenali<small>Matikan agar setiap mutasi dikonfirmasi dahulu.</small></span></label><div class="notice">Mapping pengirim bank mengalahkan dompet default. Untuk top-up GoPay, petakan BCA dan GoPay ke dua dompet milik sendiri.</div>${banks.map((bank) => select("map_" + bank, bank, '<option value="">Ikuti dompet default</option>' + walletOptions(data, a.mappings.find((m) => m.bank === bank)?.walletId || ""))).join("")}${err()}<button class="primary" type="submit" style="margin-top:15px">Simpan mapping</button></form>`,
+    `<form id="accountForm"><p class="small muted">${esc(a.email)} · ${esc(a.host)}:${a.port}</p>${select("walletId", "Dompet default", walletOptions(data, a.walletId))}<label class="toggle-row"><input type="checkbox" name="enabled" ${a.enabled ? "checked" : ""}><span>Aktifkan sinkronisasi</span></label><label class="toggle-row"><input type="checkbox" name="autoPost" ${a.autoPost ? "checked" : ""}><span>Catat otomatis ke buku kas<small>Jika aktif, email dengan nominal dan arah yang jelas langsung tercatat. Matikan untuk memeriksa setiap mutasi dahulu.</small></span></label><div class="notice">Mapping pengirim bank mengalahkan dompet default. Untuk top-up GoPay, petakan BCA dan GoPay ke dua dompet milik sendiri.</div>${banks.map((bank) => select("map_" + bank, bank, '<option value="">Ikuti dompet default</option>' + walletOptions(data, a.mappings.find((m) => m.bank === bank)?.walletId || ""))).join("")}${err()}<button class="primary" type="submit" style="margin-top:15px">Simpan mapping</button></form>`,
   );
 }
 function unlockForm(id: string) {
@@ -318,20 +364,17 @@ async function sync() {
         total: 0,
       }),
     );
-    const r = await api.sync(
-      null,
-      (p) => {
-        if (!$("#overlay").classList.contains("hidden")) $("#sheetBody").innerHTML = syncBody(p);
-        const inline = $("#syncInline");
-        if (inline)
-          inline.innerHTML = `<div class="sync-inline"><p class="tiny muted">${esc(p.message)}</p><div class="progress"><span style="width:${p.total ? Math.round((p.current / p.total) * 100) : 10}%"></span></div></div>`;
-      },
-      getSyncRange(),
-    );
+    const r = await api.sync(null, (p) => {
+      if (!$("#overlay").classList.contains("hidden"))
+        $("#sheetBody").innerHTML = syncBody(p);
+      const inline = $("#syncInline");
+      if (inline)
+        inline.innerHTML = `<div class="sync-inline"><p class="tiny muted">${esc(p.message)}</p><div class="progress"><span style="width:${p.total ? Math.round((p.current / p.total) * 100) : 10}%"></span></div></div>`;
+    }, getSyncRange());
     await refresh();
     sheet(
       "Sinkronisasi selesai",
-      `<div class="sync-icon">${icon("check")}</div><h3 class="sync-status">${r.fetched ? "Uangmu semakin tertata." : r.warnings.length ? "Sinkronisasi perlu perhatian." : "Sudah paling baru."}</h3><p class="sync-sub">${r.fetched} email diproses · ${r.remaining} menunggu batch berikut</p><div class="sync-grid"><div class="sync-stat"><b>${r.posted}</b><small>tercatat</small></div><div class="sync-stat"><b>${r.review}</b><small>perlu review</small></div><div class="sync-stat"><b>${r.emailDuplicates + r.ledgerDuplicates}</b><small>duplikat dicegah</small></div></div><div class="card"><div class="detail-line"><span>Message-ID / GMID</span><span>${r.emailDuplicates}</span></div><div class="detail-line"><span>Referensi bank</span><span>${r.ledgerDuplicates}</span></div><div class="detail-line"><span>Diabaikan / error</span><span>${r.ignored} / ${r.errors}</span></div></div>${r.warnings.map((w) => `<div class="notice orange">${esc(w)}</div>`).join("")}${btn("go-review", "Buka kotak review")}${r.remaining ? `<div style="margin-top:10px">${btn("sync", "Lanjutkan batch berikut", "secondary")}</div>` : ""}`,
+      `<div class="sync-icon">${icon("check")}</div><h3 class="sync-status">${r.fetched ? "Uangmu semakin tertata." : r.warnings.length ? "Sinkronisasi perlu perhatian." : "Sudah paling baru."}</h3><p class="sync-sub">${r.fetched} email diproses · ${r.remaining} menunggu batch berikut</p><div class="sync-grid"><div class="sync-stat"><b>${r.posted}</b><small>tercatat</small></div><div class="sync-stat"><b>${r.review}</b><small>perlu review</small></div><div class="sync-stat"><b>${r.emailDuplicates + r.ledgerDuplicates}</b><small>duplikat dicegah</small></div></div><div class="card"><div class="detail-line"><span>Message-ID / GMID</span><span>${r.emailDuplicates}</span></div><div class="detail-line"><span>Referensi bank</span><span>${r.ledgerDuplicates}</span></div><div class="detail-line"><span>Diabaikan / error</span><span>${r.ignored} / ${r.errors}</span></div></div>${r.warnings.map((w) => `<div class="notice orange">${esc(w)}</div>`).join("")}${btn("go-review", "Buka kotak review")}${r.remaining ? `<div style="margin-top:10px">${btn("sync-start", "Lanjutkan batch berikut", "secondary")}</div>` : ""}`,
     );
   } catch (e) {
     await refresh();
@@ -345,15 +388,25 @@ async function sync() {
 }
 function analytics() {
   const ts = data.transactions.filter(
-      (t) => t.occurredAt.startsWith(view.month) && (view.wallet === "all" || t.walletId === view.wallet || t.toWalletId === view.wallet),
+      (t) =>
+        t.occurredAt.startsWith(view.month) &&
+        (view.wallet === "all" ||
+          t.walletId === view.wallet ||
+          t.toWalletId === view.wallet),
     ),
-    ins = ts.filter((t) => t.kind === "income").reduce((n, t) => n + t.amount, 0),
-    outs = ts.filter((t) => t.kind === "expense").reduce((n, t) => n + t.amount, 0),
+    ins = ts
+      .filter((t) => t.kind === "income")
+      .reduce((n, t) => n + t.amount, 0),
+    outs = ts
+      .filter((t) => t.kind === "expense")
+      .reduce((n, t) => n + t.amount, 0),
     groups = Object.entries(cats)
       .filter(([k]) => !["income", "transfer"].includes(k))
       .map(([k, c]) => ({
         ...c,
-        amount: ts.filter((t) => t.kind === "expense" && t.category === k).reduce((n, t) => n + t.amount, 0),
+        amount: ts
+          .filter((t) => t.kind === "expense" && t.category === k)
+          .reduce((n, t) => n + t.amount, 0),
       }))
       .filter((c) => c.amount);
   let start = 0;
@@ -376,7 +429,18 @@ function exportCsv() {
     return '"' + s.replace(/"/g, '""') + '"';
   };
   const lines = [
-    ["Tanggal", "Merchant", "Jenis", "Nominal Rupiah", "Dompet", "Tujuan", "Kategori", "Sumber", "Referensi", "Catatan"],
+    [
+      "Tanggal",
+      "Merchant",
+      "Jenis",
+      "Nominal Rupiah",
+      "Dompet",
+      "Tujuan",
+      "Kategori",
+      "Sumber",
+      "Referensi",
+      "Catatan",
+    ],
     ...data.transactions
       .filter((t) => t.occurredAt.startsWith(view.month))
       .map((t) => [
@@ -393,7 +457,10 @@ function exportCsv() {
       ]),
   ];
   const url = URL.createObjectURL(
-    new Blob(["\uFEFF" + lines.map((r) => r.map(protect).join(",")).join("\r\n")], { type: "text/csv;charset=utf-8" }),
+    new Blob(
+      ["\uFEFF" + lines.map((r) => r.map(protect).join(",")).join("\r\n")],
+      { type: "text/csv;charset=utf-8" },
+    ),
   );
   const a = document.createElement("a");
   a.href = url;
@@ -402,124 +469,37 @@ function exportCsv() {
   setTimeout(() => URL.revokeObjectURL(url), 2000);
   toast("Laporan CSV disiapkan untuk diunduh.");
 }
-function syncOptions() {
-  sheet(
-    "Pilih periode email",
-    `<p class="small muted">Pilih rentang waktu email yang ingin diperiksa. Email yang sudah dicatat tidak akan dicatat ganda.</p>${select("syncRange", "Rentang waktu", syncRangeOptions())}<div class="notice">Semua email diproses bertahap, maksimal 200 email per akun dalam satu proses.</div>${btn("sync-start", "Mulai sinkronisasi", "primary")}`
-  );
-}
-
 function showHelp() {
   sheet(
     "Tentang Arus",
-    `<div class="wizard-illustration">${icon("shield")}</div><h3 class="wizard-title">Keuangan tertata, privasi terjaga.</h3><p class="small">Arus membantu Anda mencatat pemasukan, pengeluaran, dan mutasi secara otomatis langsung di perangkat Anda.</p><div class="notice">${api.native ? "Catatan keuangan Anda tersimpan di ponsel dan tidak dikirim ke server pengembang." : "Ini adalah pratinjau dengan data contoh. Email asli tidak dihubungkan."}</div><div class="card"><div class="detail-line"><span>Catatan Anda</span><span>Tersimpan di perangkat</span></div><div class="detail-line"><span>Email Anda</span><span>Tetap aman & belum dibaca</span></div><div class="detail-line"><span>Kata sandi email</span><span>Hanya selama sesi aktif (RAM)</span></div><div class="detail-line"><span>Versi Arus</span><span>v0.3.5</span></div></div><p class="small muted">Koneksi internet hanya digunakan saat mengambil email atau memeriksa pembaruan.</p>`,
+    `<div class="wizard-illustration">${icon("shield")}</div><h3 class="wizard-title">Keuangan tertata, privasi terjaga.</h3><p class="small">Arus membantu Anda mencatat pemasukan, pengeluaran, dan perpindahan uang antardompet dalam satu tempat.</p><div class="notice">${api.native ? "Catatan keuangan Anda tersimpan di ponsel dan tidak dikirim ke server pengembang." : "Ini adalah pratinjau dengan data contoh. Email asli tidak dihubungkan."}</div><div class="card"><div class="detail-line"><span>Catatan Anda</span><span>Tersimpan di perangkat</span></div><div class="detail-line"><span>Email</span><span>Tetap belum dibaca</span></div><div class="detail-line"><span>Kata sandi email</span><span>Hanya selama sesi aktif</span></div><div class="detail-line"><span>Versi Arus</span><span>${esc(appVersion)}</span></div></div><p class="small muted">Internet diperlukan saat mengambil email atau memeriksa pembaruan. Lindungi ponsel Anda dan simpan salinan catatan penting sebelum menghapus aplikasi.</p>`,
   );
 }
-let press: { id: string; pointer: number; x: number; y: number; timer: ReturnType<typeof setTimeout> } | null = null;
-let suppressedCard = "",
-  suppressUntil = 0;
-function cancelPress() {
-  if (press) clearTimeout(press.timer);
-  press = null;
+function syncOptions() {
+  sheet("Pilih periode email", `<p class="small muted">Pilih email yang ingin diperiksa. Email yang sudah diproses tidak dicatat ulang.</p>${select("syncRange", "Rentang waktu", syncRangeOptions())}<div class="notice">Semua email diproses bertahap, maksimal 200 email per akun dalam satu proses.</div>${btn("sync-start", "Mulai sinkronisasi", "primary")}`);
 }
-function clearSelection() {
-  view.selectionMode = false;
-  view.selectedIds = new Set();
-  cancelPress();
-}
-function toggleReview(id: string, force = false) {
-  if (busy || !data.emails.some((e) => e.id === id && e.status === "review")) return;
-  view.selectionMode = true;
-  const ids = new Set(view.selectedIds);
-  if (force || !ids.has(id)) ids.add(id);
-  else ids.delete(id);
-  view.selectedIds = ids;
-  render(true);
-}
-document.addEventListener("pointerdown", (e) => {
-  const card = (e.target as Element).closest<HTMLElement>('[data-selectable="true"]');
-  if (
-    !card ||
-    busy ||
-    view.page !== "review" ||
-    view.status !== "review" ||
-    e.button !== 0 ||
-    (e.target as Element).closest('[role="checkbox"]')
-  )
-    return;
-  cancelPress();
-  const id = card.dataset.reviewId!;
-  press = {
-    id,
-    pointer: e.pointerId,
-    x: e.clientX,
-    y: e.clientY,
-    timer: setTimeout(() => {
-      suppressedCard = id;
-      suppressUntil = performance.now() + 800;
-      press = null;
-      toggleReview(id, true);
-    }, 500),
-  };
-});
-document.addEventListener("pointermove", (e) => {
-  if (press && press.pointer === e.pointerId && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 10) cancelPress();
-});
-for (const event of ["pointerup", "pointercancel", "lostpointercapture"]) {
-  document.addEventListener(event, () => cancelPress());
-}
-document.addEventListener("scroll", () => cancelPress(), true);
-window.addEventListener("blur", cancelPress);
-document.addEventListener("contextmenu", (e) => {
-  if ((e.target as Element).closest('[data-selectable="true"]')) e.preventDefault();
-});
-async function resolveBatch(action: "post" | "ignore", all = false) {
-  const ids = data.emails.filter((e) => e.status === "review" && (all || view.selectedIds?.has(e.id))).map((e) => e.id);
-  if (!ids.length) {
-    toast("Pilih setidaknya satu transaksi.");
+let downloadedUpdate = false;
+async function installDownloadedUpdate() {
+  if (!downloadedUpdate) throw Error("Unduh pembaruan terlebih dahulu.");
+  const permission = await api.updateInstallPermission();
+  if (!permission) {
+    await api.updateInstallSettings();
+    toast("Izinkan instalasi dari Arus, lalu kembali dan tekan Pasang lagi.");
     return;
   }
-  if (busy) return;
-  busy = true;
-  view.reviewBusy = true;
-  undo = null;
-  cancelPress();
-  render(true);
-  try {
-    const r = await api.batchResolve({ items: ids.map((emailId) => ({ emailId, action, entry: null })) });
-    clearSelection();
-    view.reviewBusy = false;
-    await refresh();
-    toast(
-      `${r.posted + r.updated} dicatat, ${r.ignored} diabaikan, ${r.duplicates} bukti duplikat, ${r.unchanged} sudah diproses.${r.referenceConflicts ? ` ${r.referenceConflicts} referensi berulang tetap disimpan di bukti email.` : ""}`,
-    );
-  } catch (e) {
-    view.reviewBusy = false;
-    render(true);
-    toast(errorText(e));
-  } finally {
-    busy = false;
-    view.reviewBusy = false;
-  }
+  await api.installUpdate();
+  toast("Konfirmasikan pembaruan pada dialog Android.");
 }
 document.addEventListener("click", async (e) => {
-  const el = (e.target as Element).closest<HTMLElement>("[data-act],[data-page]");
+  const el = (e.target as Element).closest<HTMLElement>(
+    "[data-act],[data-page]",
+  );
   if (!el) {
     if (e.target === $("#overlay")) close();
     return;
   }
   if (el instanceof HTMLButtonElement && el.disabled) return;
-  const reviewCard = el.closest<HTMLElement>("[data-review-id]");
-  if (reviewCard?.dataset.reviewId === suppressedCard && performance.now() < suppressUntil) {
-    e.preventDefault();
-    return;
-  }
-  if (busy && el.dataset.page) {
-    toast("Tunggu sampai proses selesai.");
-    return;
-  }
   if (el.dataset.page) {
-    clearSelection();
     view.page = el.dataset.page as Page;
     close();
     render();
@@ -579,10 +559,34 @@ document.addEventListener("click", async (e) => {
         await refresh();
         toast("Transaksi dihapus.", () => api.deleteEntry(id, true));
         break;
+      case "catat-semua": {
+        const pending = data.emails.filter((e) => e.status === "review");
+        if (!pending.length) break;
+        let count = 0;
+        for (const e of pending) {
+          if (!e.parsed) continue;
+          await api.resolve({
+            emailId: e.id,
+            action: "post",
+            entry: {
+              walletId: e.parsed.walletId,
+              toWalletId: e.parsed.toWalletId,
+              kind: e.parsed.kind as Kind,
+              amount: e.parsed.amount,
+              merchant: e.parsed.merchant,
+              category: e.parsed.category,
+              occurredAt: e.parsed.occurredAt,
+              note: "",
+            },
+          });
+          count++;
+        }
+        await refresh();
+        toast(`${count} transaksi berhasil dicatat.`);
+        break;
+      }
       case "audit":
-        if (view.selectionMode && view.status === "review" && data.emails.some((e) => e.id === id && e.status === "review"))
-          toggleReview(id);
-        else audit(id);
+        audit(id);
         break;
       case "ignore-email":
         await api.resolve({ emailId: id, action: "ignore", entry: null });
@@ -590,37 +594,11 @@ document.addEventListener("click", async (e) => {
         await refresh();
         toast("Email diabaikan.", () => api.undoReview(id));
         break;
-      case "start-selection":
-        view.selectionMode = true;
-        render(true);
-        break;
-      case "cancel-selection":
-        clearSelection();
-        render(true);
-        break;
-      case "toggle-review":
-        toggleReview(id);
-        break;
-      case "select-all-review":
-        view.selectedIds = new Set(data.emails.filter((e) => e.status === "review").map((e) => e.id));
-        view.selectionMode = true;
-        render(true);
-        break;
-      case "batch-post-all":
-        await resolveBatch("post", true);
-        break;
-      case "batch-post-selected":
-        await resolveBatch("post");
-        break;
-      case "batch-ignore-selected":
-        await resolveBatch("ignore");
-        break;
       case "kind-filter":
         view.kind = id;
         render();
         break;
       case "status-filter":
-        clearSelection();
         view.status = id;
         render();
         break;
@@ -663,11 +641,14 @@ document.addEventListener("click", async (e) => {
           (t) =>
             t.occurredAt.startsWith(view.month) &&
             Number(t.occurredAt.slice(8, 10)) === Number(id) &&
-            (view.wallet === "all" || t.walletId === view.wallet || t.toWalletId === view.wallet),
+            (view.wallet === "all" ||
+              t.walletId === view.wallet ||
+              t.toWalletId === view.wallet),
         );
         sheet(
           "Arus kas · tanggal " + id,
-          ts.map((t) => row(data, t)).join("") || empty("Belum ada transaksi", "Tidak ada transaksi pada hari ini."),
+          ts.map((t) => row(data, t)).join("") ||
+            empty("Belum ada transaksi", "Tidak ada transaksi pada hari ini."),
         );
         break;
       }
@@ -717,7 +698,11 @@ document.addEventListener("click", async (e) => {
         $("#formError").textContent = "";
         try {
           const report = await api.test(connectionInput(draft));
-          if (!$("#connectionForm") || key !== connectionKey(entries($("#connectionForm")))) return;
+          if (
+            !$("#connectionForm") ||
+            key !== connectionKey(entries($("#connectionForm")))
+          )
+            return;
           testedKey = key;
           testedReport = report;
           $("#connectionResult").innerHTML =
@@ -746,6 +731,43 @@ document.addEventListener("click", async (e) => {
       case "theme":
         await api.theme(data.theme === "dark" ? "light" : "dark");
         await refresh();
+        break;
+      case "notif-settings":
+        await api.notificationOpenSettings();
+        break;
+      case "notif-sync": {
+        const count = await api.notificationImport();
+        await refresh();
+        toast(count ? `${count} notifikasi transaksi diproses.` : "Tidak ada notifikasi baru.");
+        break;
+      }
+      case "check-update": {
+        busy = true;
+        try {
+          toast("Memeriksa pembaruan…");
+          const u = await api.checkUpdate();
+          downloadedUpdate = false;
+          if (u.available) {
+            sheet("Pembaruan tersedia", `<div class="notice">Arus ${esc(u.latestVersion)} tersedia. Versi terpasang: ${esc(u.currentVersion)}.</div><p class="small update-notes">${esc(u.notes)}</p><p class="tiny muted">Ukuran: ${(u.apkSize / 1048576).toFixed(1)} MB</p>${btn("download-update", "Unduh pembaruan", "primary")}`);
+          } else toast(`Arus ${u.currentVersion || appVersion} sudah versi terbaru.`);
+        } finally { busy = false; }
+        break;
+      }
+      case "download-update": {
+        busy = true;
+        try {
+          sheet("Mengunduh pembaruan", '<p class="small">Tunggu sampai unduhan dan pemeriksaan selesai.</p><progress class="update-progress" aria-label="Mengunduh pembaruan"></progress>');
+          if (!await api.downloadUpdate()) throw Error("Unduhan belum selesai. Coba lagi.");
+          downloadedUpdate = true;
+          sheet("Pembaruan siap", `<p class="small">Tekan Pasang untuk membuka pemasangan Android. Catatan Anda tetap disimpan oleh aplikasi.</p>${btn("install-update", "Pasang pembaruan", "primary")}`);
+        } catch (error) {
+          sheet("Unduhan belum berhasil", `<div class="notice orange">${esc(errorText(error))}</div>${btn("download-update", "Coba unduh lagi", "primary")}`);
+        } finally { busy = false; }
+        break;
+      }
+      case "install-update":
+        busy = true;
+        try { await installDownloadedUpdate(); } finally { busy = false; }
         break;
       case "sync":
         syncOptions();
@@ -780,7 +802,11 @@ document.addEventListener("input", (e) => {
     $("#resultCount").textContent = filtered(data, view).length + " transaksi";
   }
   if (target.closest("#connectionForm")) invalidateConnection();
-  if (target.id === "f-merchant" && $("#manualForm") && formKind === "expense") {
+  if (
+    target.id === "f-merchant" &&
+    $("#manualForm") &&
+    formKind === "expense"
+  ) {
     const c = classifyMerchant(target.value);
     if (c !== "other") $<HTMLSelectElement>("#f-category").value = c;
   }
@@ -795,6 +821,7 @@ function invalidateConnection() {
 }
 document.addEventListener("change", (e) => {
   const target = e.target as HTMLInputElement | HTMLSelectElement;
+  if (target.id === "syncRange" || target.id === "f-syncRange") setSyncRange(target.value);
   if (target.id === "monthSelect") {
     view.month = target.value;
     render();
@@ -802,9 +829,6 @@ document.addEventListener("change", (e) => {
   if (target.id === "walletSelect") {
     view.wallet = target.value;
     render();
-  }
-  if (target.name === "syncRange") {
-    setSyncRange(target.value);
   }
   if (target.id === "f-provider") {
     $("#customFields").classList.toggle("hidden", target.value !== "Custom");
@@ -830,7 +854,9 @@ document.addEventListener("submit", async (e) => {
         const id = await api.manual(entry);
         close();
         await refresh();
-        toast("Transaksi tercatat. Saldo diperbarui.", () => api.deleteEntry(id, false));
+        toast("Transaksi tercatat. Saldo diperbarui.", () =>
+          api.deleteEntry(id, false),
+        );
         break;
       }
       case "reviewForm": {
@@ -843,12 +869,7 @@ document.addEventListener("submit", async (e) => {
         await api.resolve(input);
         close();
         await refresh();
-        toast(
-          data.emails.find((e) => e.id === id)?.status === "duplicate"
-            ? "Bukti transaksi identik sudah tercatat; saldo tidak digandakan."
-            : "Transaksi dikonfirmasi dan tercatat.",
-          () => api.undoReview(id),
-        );
+        toast("Transaksi dikonfirmasi dan tercatat.", () => api.undoReview(id));
         break;
       }
       case "walletForm":
@@ -881,7 +902,9 @@ document.addEventListener("submit", async (e) => {
         break;
       case "connectionForm":
         if (!testedReport || testedKey !== connectionKey(d))
-          throw Error("Lakukan Test Connection yang berhasil setelah perubahan terakhir.");
+          throw Error(
+            "Lakukan Test Connection yang berhasil setelah perubahan terakhir.",
+          );
         await api.connect(connectionInput(d), d.walletId, d.autoPost === "on");
         connectionDraft = {};
         testedKey = "";
@@ -920,20 +943,17 @@ document.addEventListener("submit", async (e) => {
   }
 });
 document.addEventListener("keydown", (e) => {
-  const card = (e.target as Element).closest<HTMLElement>('[data-selectable="true"]');
-  if (card && e.key === " " && view.page === "review" && view.status === "review") {
-    e.preventDefault();
-    if (!e.repeat) toggleReview(card.dataset.reviewId!);
-    return;
-  }
-
   if (!$("#overlay") || $("#overlay").classList.contains("hidden")) return;
   if (e.key === "Escape") {
     close();
     return;
   }
   if (e.key === "Tab") {
-    const nodes = [...$("#sheet").querySelectorAll<HTMLElement>("button,input,select,textarea,a[href]")].filter(
+    const nodes = [
+      ...$("#sheet").querySelectorAll<HTMLElement>(
+        "button,input,select,textarea,a[href]",
+      ),
+    ].filter(
       (n) => !(n as HTMLButtonElement).disabled && n.getClientRects().length,
     );
     if (!nodes.length) {
@@ -942,7 +962,11 @@ document.addEventListener("keydown", (e) => {
     }
     const first = nodes[0],
       last = nodes[nodes.length - 1];
-    if (e.shiftKey && (document.activeElement === first || document.activeElement === $("#sheet"))) {
+    if (
+      e.shiftKey &&
+      (document.activeElement === first ||
+        document.activeElement === $("#sheet"))
+    ) {
       e.preventDefault();
       last.focus();
     } else if (!e.shiftKey && document.activeElement === last) {
@@ -951,10 +975,9 @@ document.addEventListener("keydown", (e) => {
     }
   }
 });
-installSheetGesture(close);
 $("#app").innerHTML =
   '<div class="phone p-6"><div class="skeleton mt-20"></div><p class="text-center muted mt-8">Membuka buku kas lokal…</p></div>';
-refresh().catch((e) => {
+loadAppVersion().catch(() => { /* Package version remains a safe fallback. */ }).then(refresh).catch((e) => {
   $("#app").innerHTML =
     `<div class="p-8"><h1>Arus belum bisa dibuka</h1><p>${esc(errorText(e))}</p><button data-act="reload">Muat ulang</button></div>`;
 });

@@ -1,19 +1,16 @@
-use arus_core::{
-    db::{BatchReviewInput, BatchReviewReport, Database},
-    imap,
-    models::*,
-    AppError, Result,
-};
+use arus_core::{db::Database, imap, models::*, AppError, Result};
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
 };
 use tauri::{ipc::Channel, Manager, State};
 use zeroize::Zeroizing;
-struct AppState {
-    db: Database,
-    secrets: Mutex<HashMap<String, Zeroizing<String>>>,
-    sync_gate: Arc<tokio::sync::Mutex<()>>,
+mod notifications;
+
+pub struct AppState {
+    pub db: Database,
+    pub secrets: Mutex<HashMap<String, Zeroizing<String>>>,
+    pub sync_gate: Arc<tokio::sync::Mutex<()>>,
 }
 fn secret_error() -> AppError {
     AppError::new(
@@ -103,8 +100,8 @@ fn lock_email_account(state: State<'_, AppState>, account_id: String) -> Result<
 async fn sync_email_transactions(
     state: State<'_, AppState>,
     account_id: Option<String>,
-    range: Option<SyncRange>,
     on_progress: Channel<SyncProgress>,
+    range: Option<SyncRange>,
 ) -> Result<SyncReport> {
     let gate = state.sync_gate.clone();
     let _guard = gate
@@ -187,14 +184,6 @@ async fn resolve_review(state: State<'_, AppState>, input: ReviewInput) -> Resul
     blocking(move || db.resolve_review(&input)).await
 }
 #[tauri::command]
-async fn batch_resolve_review(
-    state: State<'_, AppState>,
-    input: BatchReviewInput,
-) -> Result<BatchReviewReport> {
-    let db = state.db.clone();
-    blocking(move || db.batch_resolve_review(&input)).await
-}
-#[tauri::command]
 async fn undo_review(state: State<'_, AppState>, id: String) -> Result<()> {
     let db = state.db.clone();
     blocking(move || db.undo_review(&id)).await
@@ -227,6 +216,7 @@ async fn set_theme(state: State<'_, AppState>, theme: String) -> Result<()> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification_listener::init())
         .setup(|app| {
             let directory = app.path().app_data_dir()?;
             let db = Database::open(directory.join("arus.sqlite3"))?;
@@ -248,12 +238,20 @@ pub fn run() {
             save_manual_transaction,
             delete_transaction,
             resolve_review,
-            batch_resolve_review,
             undo_review,
             upsert_wallet,
             reconcile_wallet,
             update_email_account,
-            set_theme
+            set_theme,
+            notifications::notification_status,
+            notifications::notification_open_settings,
+            notifications::notification_set_enabled,
+            notifications::notification_import,
+            notifications::check_app_update,
+            notifications::download_app_update,
+            notifications::install_app_update,
+            notifications::update_install_permission,
+            notifications::update_install_settings
         ])
         .run(tauri::generate_context!())
         .expect("Tidak dapat memulai aplikasi Arus");

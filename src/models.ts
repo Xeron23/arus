@@ -1,6 +1,5 @@
-export type SyncRange = "7" | "30" | "90" | "all";
-export type TabKey = "dashboard" | "transactions" | "review" | "settings";
 export type Kind = "expense" | "income" | "transfer";
+export type SyncRange = "7" | "30" | "90" | "all";
 export type Theme = "light" | "dark";
 export interface Wallet {
   id: string;
@@ -130,33 +129,55 @@ export interface ReviewInput {
   action: "post" | "ignore";
   entry: EntryInput | null;
 }
-export interface BatchReviewInput {
-  items: ReviewInput[];
+export interface NotificationStatus {
+  granted: boolean;
+  enabled: boolean;
+  connected: boolean;
+  lastError: string;
 }
-export interface BatchReviewReport {
-  requested: number;
-  posted: number;
-  updated: number;
-  ignored: number;
-  duplicates: number;
-  unchanged: number;
-  referenceConflicts: number;
+
+export interface UpdateInfo {
+  available: boolean;
+  currentVersion: string;
+  currentVersionCode: number;
+  latestVersion: string;
+  latestVersionCode: number;
+  notes: string;
+  apkUrl: string;
+  apkSize: number;
 }
+
 export interface FinanceAPI {
   readonly native: boolean;
   snapshot(): Promise<Snapshot>;
   test(input: ConnectionInput): Promise<ConnectionReport>;
-  connect(input: ConnectionInput, walletId: string, autoPost: boolean): Promise<string>;
+  connect(
+    input: ConnectionInput,
+    walletId: string,
+    autoPost: boolean,
+  ): Promise<string>;
   unlock(accountId: string, password: string): Promise<ConnectionReport>;
   lock(accountId: string): Promise<void>;
   updateAccount(input: AccountUpdate): Promise<void>;
-  sync(accountId: string | null, onProgress: (progress: SyncProgress) => void, range?: SyncRange): Promise<SyncReport>;
+  sync(
+    accountId: string | null,
+    onProgress: (progress: SyncProgress) => void,
+    range?: SyncRange,
+  ): Promise<SyncReport>;
   manual(input: EntryInput): Promise<string>;
   deleteEntry(id: string, undo: boolean): Promise<void>;
   resolve(input: ReviewInput): Promise<void>;
-  batchResolve(input: BatchReviewInput): Promise<BatchReviewReport>;
   undoReview(id: string): Promise<void>;
   wallet(input: WalletInput): Promise<string>;
   reconcile(id: string, observed: number, adjust: boolean): Promise<void>;
   theme(theme: Theme): Promise<void>;
+  notificationStatus(): Promise<NotificationStatus>;
+  notificationOpenSettings(): Promise<void>;
+  notificationSetEnabled(enabled: boolean): Promise<void>;
+  notificationImport(): Promise<number>;
+  checkUpdate(): Promise<UpdateInfo>;
+  downloadUpdate(): Promise<boolean>;
+  updateInstallPermission(): Promise<boolean>;
+  updateInstallSettings(): Promise<void>;
+  installUpdate(): Promise<boolean>;
 }

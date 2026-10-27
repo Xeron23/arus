@@ -1,34 +1,11 @@
 use crate::{models::*, parser, AppError, Result};
 use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
-use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
 use uuid::Uuid;
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BatchReviewInput {
-    pub items: Vec<ReviewInput>,
-}
-#[derive(Clone, Debug, Default, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BatchReviewReport {
-    pub requested: usize,
-    pub posted: usize,
-    pub updated: usize,
-    pub ignored: usize,
-    pub duplicates: usize,
-    pub unchanged: usize,
-    pub reference_conflicts: usize,
-}
-struct ReviewOutcome {
-    kind: &'static str,
-    detached: bool,
-}
-
 #[derive(Clone)]
 pub struct Database {
     path: PathBuf,
@@ -323,55 +300,61 @@ impl Database {
         Ok(())
     }
     pub fn resolve_review(&self, r: &ReviewInput) -> Result<()> {
-        self.batch_resolve_review(&BatchReviewInput {
-            items: vec![r.clone()],
-        })?;
-        Ok(())
-    }
-    /// One connection, one IMMEDIATE transaction, one commit; any error rolls back all items.
-    pub fn batch_resolve_review(&self, input: &BatchReviewInput) -> Result<BatchReviewReport> {
-        if input.items.is_empty() || input.items.len() > 2000 {
-            return Err(AppError::new(
-                "VALIDATION",
-                "Batch harus berisi 1–2000 email.",
-            ));
-        }
-        let mut ids = HashSet::new();
-        if input.items.iter().any(|r| !ids.insert(r.email_id.as_str())) {
-            return Err(AppError::new(
-                "VALIDATION",
-                "Email yang sama tidak boleh muncul dua kali dalam satu batch.",
-            ));
-        }
         let mut c = self.connection()?;
         let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let mut report = BatchReviewReport {
-            requested: input.items.len(),
-            ..Default::default()
-        };
-        for r in &input.items {
-            let outcome = resolve_one(&tx, r).map_err(|e| {
-                AppError::new(
-                    &e.code,
-                    format!(
-                        "Email {}: {} Seluruh batch dibatalkan.",
-                        r.email_id, e.message
-                    ),
-                )
-            })?;
-            match outcome.kind {
-                "posted" => report.posted += 1,
-                "updated" => report.updated += 1,
-                "ignored" => report.ignored += 1,
-                "duplicate" => report.duplicates += 1,
-                _ => report.unchanged += 1,
-            }
-            if outcome.detached {
-                report.reference_conflicts += 1;
-            }
+        let (status, parsed): (String, Option<String>) = tx
+            .query_row(
+                "SELECT status,parsed FROM emails WHERE id=?1",
+                [&r.email_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?
+            .ok_or_else(|| AppError::new("NOT_FOUND", "Email tidak ditemukan."))?;
+        if !["review", "error"].contains(&status.as_str()) {
+            return Err(AppError::new(
+                "CONFLICT",
+                "Email ini sudah diproses. Muat ulang daftar.",
+            ));
         }
+        if r.action == "ignore" {
+            tx.execute(
+                "UPDATE emails SET status='ignored',reason='Diabaikan pengguna' WHERE id=?1",
+                [&r.email_id],
+            )?;
+        } else if r.action == "post" {
+            let e = r
+                .entry
+                .as_ref()
+                .ok_or_else(|| AppError::new("VALIDATION", "Data koreksi belum lengkap."))?;
+            let p: Option<Parsed> = parsed.and_then(|v| serde_json::from_str(&v).ok());
+            let bank = p.as_ref().map(|p| p.bank.as_str()).unwrap_or("Unknown");
+            let reference = p.as_ref().and_then(|p| p.reference.as_deref());
+            let existing: Option<String> = tx
+                .query_row(
+                    "SELECT id FROM ledger WHERE email_id=?1",
+                    [&r.email_id],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            if let Some(id) = existing {
+                validate_entry(&tx, e)?;
+                tx.execute("UPDATE ledger SET deleted=0,wallet_id=?1,to_wallet_id=?2,kind=?3,amount=?4,merchant=?5,category=?6,occurred_at=?7,note=?8 WHERE id=?9",params![e.wallet_id,e.to_wallet_id,e.kind,e.amount,e.merchant,category_for(e),e.occurred_at,e.note,id])?;
+            } else {
+                // If reference exists, insert entry anyway without duplicate block on user manual review confirmation
+                insert_entry(&tx, e, reference, Some(&r.email_id), "Email", bank)?;
+            }
+            tx.execute("UPDATE emails SET status='posted',reason='Dikonfirmasi dan dikoreksi pengguna' WHERE id=?1",[&r.email_id])?;
+        } else {
+            return Err(AppError::new("VALIDATION", "Aksi review tidak dikenal."));
+        }
+        audit(
+            &tx,
+            &format!("review_{}", r.action),
+            &r.email_id,
+            "User confirmed email action",
+        )?;
         tx.commit()?;
-        Ok(report)
+        Ok(())
     }
     pub fn undo_review(&self, id: &str) -> Result<()> {
         let mut c = self.connection()?;
@@ -379,7 +362,7 @@ impl Database {
         let status: Option<String> = tx
             .query_row("SELECT status FROM emails WHERE id=?1", [id], |r| r.get(0))
             .optional()?;
-        if !status.is_some_and(|s| ["posted", "ignored", "duplicate"].contains(&s.as_str())) {
+        if !status.is_some_and(|s| ["posted", "ignored"].contains(&s.as_str())) {
             return Err(AppError::new(
                 "CONFLICT",
                 "Status email tidak dapat di-undo.",
@@ -448,18 +431,10 @@ impl Database {
             tx.commit()?;
             return Ok("email_duplicate".into());
         }
-        if let Some(p) = email.parsed.as_mut() {
-            p.reference = parser::normalize_reference(p.reference.as_deref());
-            p.merchant = parser::clean_merchant(&p.merchant);
-            let e = entry_from_parsed(p);
-            let conflicts =
-                reference_conflicts(&tx, &e.wallet_id, &p.bank, p.reference.as_deref(), None)?;
-            if conflicts.iter().any(|t| same_entry(t, &e)) {
+        if let Some(p) = &email.parsed {
+            if reference_duplicate(&tx, &p.wallet_id, &p.bank, p.reference.as_deref())? {
                 email.status = "duplicate".into();
-                email.reason = "Referensi dan identitas transaksi sudah tercatat (lapis 2)".into();
-            } else if !conflicts.is_empty() {
-                email.status = "review".into();
-                email.reason = "Referensi digunakan mutasi lain. Konfirmasi untuk mencatat transaksi ini secara terpisah.".into();
+                email.reason = "Referensi bank sudah tercatat (deduplikasi lapis 2)".into()
             }
         }
         tx.execute("INSERT INTO emails(id,account_id,mailbox,uid_validity,uid,message_id,gm_id,sender,subject,received_at,raw_snippet,status,reason,parsed) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",params![email.id,email.account_id,email.mailbox,email.uid_validity,email.uid,email.message_id,email.gm_id,email.sender,email.subject,email.received_at,email.raw_snippet,email.status,email.reason,email.parsed.as_ref().map(serde_json::to_string).transpose()?])?;
@@ -499,6 +474,7 @@ impl Database {
     }
 }
 fn advance(tx: &Transaction<'_>, m: &MailInput) -> Result<()> {
+    tx.execute("INSERT OR IGNORE INTO sync_receipts(account_id,mailbox,uid_validity,uid) VALUES(?1,?2,?3,?4)", params![m.account_id,m.mailbox,m.uid_validity,m.uid])?;
     tx.execute("INSERT INTO cursors(account_id,mailbox,uid_validity,last_uid) VALUES(?1,?2,?3,?4) ON CONFLICT(account_id,mailbox) DO UPDATE SET last_uid=MAX(last_uid,excluded.last_uid),uid_validity=excluded.uid_validity",params![m.account_id,m.mailbox,m.uid_validity,m.uid])?;
     Ok(())
 }
@@ -581,188 +557,21 @@ fn insert_entry(
     tx.execute("INSERT INTO ledger(id,wallet_id,to_wallet_id,kind,amount,merchant,category,occurred_at,source,reference,bank,email_id,note) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",params![id,e.wallet_id,if e.kind=="transfer"{e.to_wallet_id.as_deref()}else{None},e.kind,e.amount,e.merchant.trim(),category_for(e),e.occurred_at,source,reference,bank,email_id,e.note])?;
     Ok(id)
 }
-fn entry_from_parsed(p: &Parsed) -> EntryInput {
-    let merchant = parser::clean_merchant(&p.merchant);
-    let category = if p.kind == "income" {
-        "income".into()
-    } else if p.kind == "transfer" {
-        "transfer".into()
-    } else if p.category == "other" {
-        parser::category(&merchant)
-    } else {
-        p.category.clone()
-    };
-    EntryInput {
-        wallet_id: p.wallet_id.clone(),
-        to_wallet_id: p.to_wallet_id.clone(),
-        kind: p.kind.clone(),
-        amount: p.amount,
-        merchant,
-        category,
-        occurred_at: p.occurred_at.clone(),
-        note: "Dikonfirmasi dari review email".into(),
-    }
-}
-fn same_entry(t: &LedgerEntry, e: &EntryInput) -> bool {
-    let key = |s: &str| parser::clean_merchant(s).to_lowercase();
-    let time = |s: &str| DateTime::parse_from_rfc3339(s).ok();
-    t.wallet_id == e.wallet_id
-        && t.kind == e.kind
-        && t.amount == e.amount
-        && t.to_wallet_id.as_deref().filter(|_| t.kind == "transfer")
-            == e.to_wallet_id.as_deref().filter(|_| e.kind == "transfer")
-        && key(&t.merchant) == key(&e.merchant)
-        && time(&t.occurred_at).is_some()
-        && time(&t.occurred_at) == time(&e.occurred_at)
-}
-fn reference_conflicts(
+fn reference_duplicate(
     c: &Connection,
     wallet: &str,
     bank: &str,
     reference: Option<&str>,
-    except: Option<&str>,
-) -> Result<Vec<LedgerEntry>> {
-    let Some(reference) = parser::normalize_reference(reference) else {
-        return Ok(vec![]);
-    };
-    let mut q=c.prepare("SELECT l.id,l.wallet_id,l.to_wallet_id,l.kind,l.amount,l.merchant,l.category,l.occurred_at,l.source,l.reference,l.bank,l.email_id,l.note FROM ledger l LEFT JOIN emails e ON e.id=l.email_id WHERE l.wallet_id=?1 AND lower(l.bank)=lower(?2) AND upper(trim(coalesce(nullif(trim(l.reference),''),CASE WHEN json_valid(e.parsed) THEN json_extract(e.parsed,'$.reference') END)))=?3 AND (?4 IS NULL OR l.id!=?4)")?;
-    let rows = q
-        .query_map(params![wallet, bank, reference, except], |r| {
-            Ok(LedgerEntry {
-                id: r.get(0)?,
-                wallet_id: r.get(1)?,
-                to_wallet_id: r.get(2)?,
-                kind: r.get(3)?,
-                amount: r.get(4)?,
-                merchant: r.get(5)?,
-                category: r.get(6)?,
-                occurred_at: r.get(7)?,
-                source: r.get(8)?,
-                reference: r.get(9)?,
-                bank: r.get(10)?,
-                email_id: r.get(11)?,
-                note: r.get(12)?,
-            })
-        })?
-        .collect::<std::result::Result<Vec<_>, _>>()?;
-    Ok(rows)
-}
-fn resolve_one(tx: &Connection, r: &ReviewInput) -> Result<ReviewOutcome> {
-    if !["post", "ignore"].contains(&r.action.as_str()) {
-        return Err(AppError::new("VALIDATION", "Aksi review tidak dikenal."));
-    }
-    let (status, raw): (String, Option<String>) = tx
-        .query_row(
-            "SELECT status,parsed FROM emails WHERE id=?1",
-            [&r.email_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .optional()?
-        .ok_or_else(|| AppError::new("NOT_FOUND", "Email tidak ditemukan."))?;
-    let own: Option<String> = tx
-        .query_row(
-            "SELECT id FROM ledger WHERE email_id=?1",
-            [&r.email_id],
-            |row| row.get(0),
-        )
-        .optional()?;
-    let pending = ["review", "error"].contains(&status.as_str());
-    if !pending && !(r.action == "post" && status == "posted" && own.is_some()) {
-        return Ok(ReviewOutcome {
-            kind: "unchanged",
-            detached: false,
-        });
-    }
-    if r.action == "ignore" {
-        tx.execute(
-            "UPDATE emails SET status='ignored',reason='Diabaikan pengguna' WHERE id=?1",
-            [&r.email_id],
-        )?;
-        audit(tx, "review_ignore", &r.email_id, "User ignored email")?;
-        return Ok(ReviewOutcome {
-            kind: "ignored",
-            detached: false,
-        });
-    }
-    let mut p: Option<Parsed> = raw.as_deref().map(serde_json::from_str).transpose()?;
-    let mut e=r.entry.clone().or_else(||p.as_ref().map(entry_from_parsed)).ok_or_else(||AppError::new("VALIDATION","Data parser belum lengkap. Buka audit dan isi nominal, merchant, tanggal serta dompet terlebih dahulu."))?;
-    e.merchant = parser::clean_merchant(&e.merchant);
-    if e.kind != "transfer" {
-        e.to_wallet_id = None;
-    }
-    e.category = category_for(&e).to_owned();
-    validate_entry(tx, &e)?;
-    let bank = p
-        .as_ref()
-        .map(|p| p.bank.clone())
-        .unwrap_or_else(|| "Unknown".into());
-    let original = parser::normalize_reference(p.as_ref().and_then(|p| p.reference.as_deref()));
-    let conflicts =
-        reference_conflicts(tx, &e.wallet_id, &bank, original.as_deref(), own.as_deref())?;
-    if own.is_none() {
-        if let Some(existing) = conflicts.iter().find(|t| same_entry(t, &e)) {
-            tx.execute(
-                "UPDATE emails SET status='duplicate',reason=?1 WHERE id=?2",
-                params![
-                    format!(
-                        "Bukti transaksi identik dengan ledger {}; saldo tidak dicatat dua kali.",
-                        existing.id
-                    ),
-                    r.email_id
-                ],
-            )?;
-            audit(tx, "review_duplicate", &r.email_id, &existing.id)?;
-            return Ok(ReviewOutcome {
-                kind: "duplicate",
-                detached: false,
-            });
-        }
-    }
-    let detached = !conflicts.is_empty();
-    let ledger_ref = if detached { None } else { original.as_deref() };
-    if detached {
-        audit(
-            tx,
-            "review_reference_conflict",
-            &r.email_id,
-            &format!(
-                "Original reference {:?} retained in email; ledger reference NULL",
-                original
-            ),
-        )?;
-    }
-    let kind = if let Some(id) = own {
-        tx.execute("UPDATE ledger SET deleted=0,wallet_id=?1,to_wallet_id=?2,kind=?3,amount=?4,merchant=?5,category=?6,occurred_at=?7,note=?8,reference=?9,bank=?10 WHERE id=?11",params![e.wallet_id,e.to_wallet_id,e.kind,e.amount,e.merchant,e.category,e.occurred_at,e.note,ledger_ref,bank,id])?;
-        "updated"
+) -> Result<bool> {
+    if let Some(r) = reference {
+        Ok(c.query_row(
+            "SELECT EXISTS(SELECT 1 FROM ledger WHERE wallet_id=?1 AND bank=?2 AND reference=?3)",
+            params![wallet, bank, r],
+            |r| r.get(0),
+        )?)
     } else {
-        insert_entry(tx, &e, ledger_ref, Some(&r.email_id), "Email", &bank)?;
-        "posted"
-    };
-    let p = p.get_or_insert_with(|| Parsed {
-        bank: bank.clone(),
-        amount: e.amount,
-        kind: e.kind.clone(),
-        merchant: e.merchant.clone(),
-        category: e.category.clone(),
-        occurred_at: e.occurred_at.clone(),
-        reference: None,
-        observed: None,
-        wallet_id: e.wallet_id.clone(),
-        to_wallet_id: e.to_wallet_id.clone(),
-        confident: false,
-    });
-    p.merchant = e.merchant.clone();
-    p.amount = e.amount;
-    p.wallet_id = e.wallet_id.clone();
-    p.to_wallet_id = e.to_wallet_id.clone();
-    p.kind = e.kind.clone();
-    p.category = e.category.clone();
-    p.occurred_at = e.occurred_at.clone();
-    p.reference = original;
-    let parsed = serde_json::to_string(p)?;
-    tx.execute("UPDATE emails SET status='posted',reason=?1,parsed=?2 WHERE id=?3",params![if detached{"Dikonfirmasi. Referensi bentrok disimpan pada bukti email; mutasi dicatat terpisah."}else{"Dikonfirmasi dan dikoreksi pengguna"},parsed,r.email_id])?;
-    audit(tx, "review_post", &r.email_id, kind)?;
-    Ok(ReviewOutcome { kind, detached })
+        Ok(false)
+    }
 }
 fn read_wallets(c: &Connection) -> Result<Vec<Wallet>> {
     let mut q=c.prepare("SELECT w.id,w.name,w.kind,w.bank,w.digits,w.opening,w.observed,w.opening+COALESCE((SELECT SUM(CASE WHEN l.wallet_id=w.id THEN CASE WHEN l.kind='income' THEN l.amount ELSE -l.amount END ELSE 0 END + CASE WHEN l.kind='transfer' AND l.to_wallet_id=w.id THEN l.amount ELSE 0 END) FROM ledger l WHERE l.deleted=0 AND (l.wallet_id=w.id OR l.to_wallet_id=w.id)),0) FROM wallets w ORDER BY rowid")?;
