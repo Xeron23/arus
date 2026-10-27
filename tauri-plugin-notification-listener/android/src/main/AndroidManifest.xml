@@ -13,7 +13,7 @@
         </service>
 
         <provider
-            android:name="androidx.core.content.FileProvider"
+            android:name="id.arus.notificationlistener.ArusUpdateFileProvider"
             android:authorities="${applicationId}.arus.updates"
             android:exported="false"
             android:grantUriPermissions="true">
