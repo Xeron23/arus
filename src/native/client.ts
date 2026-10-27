@@ -12,11 +12,12 @@ class NativeAPI implements FinanceAPI {
   unlock: FinanceAPI["unlock"] = (accountId, password) => invoke<ConnectionReport>("unlock_email_account", { accountId, password });
   lock: FinanceAPI["lock"] = (accountId) => invoke("lock_email_account", { accountId });
   updateAccount: FinanceAPI["updateAccount"] = (input) => invoke("update_email_account", { input });
-  sync: FinanceAPI["sync"] = (accountId, fn) => {
+  sync: FinanceAPI["sync"] = (accountId, fn, range) => {
     const onProgress = new Channel<SyncProgress>();
     onProgress.onmessage = fn;
     return invoke<SyncReport>("sync_email_transactions", {
       accountId,
+      range: range ?? null,
       onProgress,
     });
   };

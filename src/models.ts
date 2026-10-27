@@ -150,7 +150,7 @@ export interface FinanceAPI {
   unlock(accountId: string, password: string): Promise<ConnectionReport>;
   lock(accountId: string): Promise<void>;
   updateAccount(input: AccountUpdate): Promise<void>;
-  sync(accountId: string | null, onProgress: (progress: SyncProgress) => void): Promise<SyncReport>;
+  sync(accountId: string | null, onProgress: (progress: SyncProgress) => void, range?: SyncRange): Promise<SyncReport>;
   manual(input: EntryInput): Promise<string>;
   deleteEntry(id: string, undo: boolean): Promise<void>;
   resolve(input: ReviewInput): Promise<void>;
