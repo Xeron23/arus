@@ -227,7 +227,7 @@ class NotificationListenerPlugin(
                     return@runOnUiThread
                 }
 
-                val uri = ArusUpdateFileProvider.getUriForFile(
+                val uri = FileProvider.getUriForFile(
                     activity,
                     "${activity.packageName}.arus.updates",
                     apkFile
