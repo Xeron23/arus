@@ -103,7 +103,7 @@ fn lock_email_account(state: State<'_, AppState>, account_id: String) -> Result<
 async fn sync_email_transactions(
     state: State<'_, AppState>,
     account_id: Option<String>,
-    range: Option<models::SyncRange>,
+    range: Option<SyncRange>,
     on_progress: Channel<SyncProgress>,
 ) -> Result<SyncReport> {
     let gate = state.sync_gate.clone();
