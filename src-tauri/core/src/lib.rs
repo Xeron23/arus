@@ -1,6 +1,7 @@
 pub mod db;
 pub mod imap;
 pub mod models;
+pub mod notification_parser;
 pub mod parser;
 use serde::Serialize;
 #[derive(Debug, Clone, Serialize, thiserror::Error)]

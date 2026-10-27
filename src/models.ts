@@ -128,6 +128,13 @@ export interface ReviewInput {
   action: "post" | "ignore";
   entry: EntryInput | null;
 }
+export interface NotificationStatus {
+  granted: boolean;
+  enabled: boolean;
+  connected: boolean;
+  lastError: string;
+}
+
 export interface FinanceAPI {
   readonly native: boolean;
   snapshot(): Promise<Snapshot>;
@@ -151,5 +158,9 @@ export interface FinanceAPI {
   wallet(input: WalletInput): Promise<string>;
   reconcile(id: string, observed: number, adjust: boolean): Promise<void>;
   theme(theme: Theme): Promise<void>;
+  notificationStatus(): Promise<NotificationStatus>;
+  notificationOpenSettings(): Promise<void>;
+  notificationSetEnabled(enabled: boolean): Promise<void>;
+  notificationImport(): Promise<number>;
 }
 

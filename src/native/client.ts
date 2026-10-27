@@ -42,6 +42,14 @@ class NativeAPI implements FinanceAPI {
   reconcile: FinanceAPI["reconcile"] = (id, observed, adjust) =>
     invoke("reconcile_wallet", { id, observed, adjust });
   theme: FinanceAPI["theme"] = (theme) => invoke("set_theme", { theme });
+  notificationStatus: FinanceAPI["notificationStatus"] = () =>
+    invoke<import("../models").NotificationStatus>("notification_status");
+  notificationOpenSettings: FinanceAPI["notificationOpenSettings"] = () =>
+    invoke("notification_open_settings");
+  notificationSetEnabled: FinanceAPI["notificationSetEnabled"] = (enabled) =>
+    invoke("notification_set_enabled", { enabled });
+  notificationImport: FinanceAPI["notificationImport"] = () =>
+    invoke<number>("notification_import");
 }
 // Native errors never fall back to mock: this would disguise failed real sync.
 export const api: FinanceAPI = isTauri() ? new NativeAPI() : new MockAPI();

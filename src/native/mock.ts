@@ -639,5 +639,18 @@ export class MockAPI implements FinanceAPI {
     this.s.theme = theme;
     await this.save();
   }
+  async notificationStatus() {
+    return {
+      granted: true,
+      enabled: true,
+      connected: true,
+      lastError: "",
+    };
+  }
+  async notificationOpenSettings() {}
+  async notificationSetEnabled() {}
+  async notificationImport() {
+    return 0;
+  }
 }
 

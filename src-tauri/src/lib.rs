@@ -5,10 +5,12 @@ use std::{
 };
 use tauri::{ipc::Channel, Manager, State};
 use zeroize::Zeroizing;
-struct AppState {
-    db: Database,
-    secrets: Mutex<HashMap<String, Zeroizing<String>>>,
-    sync_gate: Arc<tokio::sync::Mutex<()>>,
+mod notifications;
+
+pub struct AppState {
+    pub db: Database,
+    pub secrets: Mutex<HashMap<String, Zeroizing<String>>>,
+    pub sync_gate: Arc<tokio::sync::Mutex<()>>,
 }
 fn secret_error() -> AppError {
     AppError::new(
@@ -213,6 +215,7 @@ async fn set_theme(state: State<'_, AppState>, theme: String) -> Result<()> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification_listener::init())
         .setup(|app| {
             let directory = app.path().app_data_dir()?;
             let db = Database::open(directory.join("arus.sqlite3"))?;
@@ -238,7 +241,11 @@ pub fn run() {
             upsert_wallet,
             reconcile_wallet,
             update_email_account,
-            set_theme
+            set_theme,
+            notifications::notification_status,
+            notifications::notification_open_settings,
+            notifications::notification_set_enabled,
+            notifications::notification_import
         ])
         .run(tauri::generate_context!())
         .expect("Tidak dapat memulai aplikasi Arus");

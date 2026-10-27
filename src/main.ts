@@ -684,6 +684,15 @@ document.addEventListener("click", async (e) => {
         await api.theme(data.theme === "dark" ? "light" : "dark");
         await refresh();
         break;
+      case "notif-settings":
+        await api.notificationOpenSettings();
+        break;
+      case "notif-sync": {
+        const count = await api.notificationImport();
+        await refresh();
+        toast(count ? `${count} notifikasi transaksi diproses.` : "Tidak ada notifikasi baru.");
+        break;
+      }
       case "sync":
         await sync();
         break;
