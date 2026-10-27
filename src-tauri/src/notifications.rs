@@ -62,14 +62,14 @@ pub async fn notification_status(app: AppHandle) -> Result<NotificationStatus, S
 pub async fn notification_open_settings(app: AppHandle) -> Result<(), String> {
     #[cfg(target_os = "android")]
     {
-        tauri::async_runtime::spawn_blocking(move || {
+        tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
             let plugin = app.state::<Native<tauri::Wry>>();
-            plugin.0.run_mobile_plugin("openSettings", json!({}))
+            let _ = plugin.0.run_mobile_plugin("openSettings", json!({}))
+                .map_err(|e| e.to_string())?;
+            Ok(())
         })
         .await
         .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())?;
-        Ok(())
     }
     #[cfg(not(target_os = "android"))]
     {
@@ -82,14 +82,14 @@ pub async fn notification_open_settings(app: AppHandle) -> Result<(), String> {
 pub async fn notification_set_enabled(app: AppHandle, enabled: bool) -> Result<(), String> {
     #[cfg(target_os = "android")]
     {
-        tauri::async_runtime::spawn_blocking(move || {
+        tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
             let plugin = app.state::<Native<tauri::Wry>>();
-            plugin.0.run_mobile_plugin("setEnabled", json!({ "enabled": enabled }))
+            let _ = plugin.0.run_mobile_plugin("setEnabled", json!({ "enabled": enabled }))
+                .map_err(|e| e.to_string())?;
+            Ok(())
         })
         .await
         .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())?;
-        Ok(())
     }
     #[cfg(not(target_os = "android"))]
     {
