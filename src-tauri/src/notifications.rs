@@ -64,7 +64,7 @@ pub async fn notification_open_settings(app: AppHandle) -> Result<(), String> {
     {
         tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
             let plugin = app.state::<Native<tauri::Wry>>();
-            let _ = plugin.0.run_mobile_plugin("openSettings", json!({}))
+            let _ = plugin.0.run_mobile_plugin::<Value>("openSettings", json!({}))
                 .map_err(|e| e.to_string())?;
             Ok(())
         })
@@ -84,7 +84,7 @@ pub async fn notification_set_enabled(app: AppHandle, enabled: bool) -> Result<(
     {
         tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
             let plugin = app.state::<Native<tauri::Wry>>();
-            let _ = plugin.0.run_mobile_plugin("setEnabled", json!({ "enabled": enabled }))
+            let _ = plugin.0.run_mobile_plugin::<Value>("setEnabled", json!({ "enabled": enabled }))
                 .map_err(|e| e.to_string())?;
             Ok(())
         })
@@ -154,7 +154,7 @@ pub async fn notification_import(app: AppHandle) -> Result<usize, String> {
                 let app = app.clone();
                 move || {
                     let plugin = app.state::<Native<tauri::Wry>>();
-                    plugin.0.run_mobile_plugin("ack", json!({ "ids": processed_ids }))
+                    let _ = plugin.0.run_mobile_plugin::<Value>("ack", json!({ "ids": processed_ids }));
                 }
             })
             .await;
