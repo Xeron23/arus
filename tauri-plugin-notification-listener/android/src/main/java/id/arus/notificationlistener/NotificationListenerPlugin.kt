@@ -213,15 +213,6 @@ class NotificationListenerPlugin(
     fun installUpdate(invoke: Invoke) {
         activity.runOnUiThread {
             try {
-                if (Build.VERSION.SDK_INT >= 26 && !activity.packageManager.canRequestPackageInstalls()) {
-                    val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
-                        data = Uri.parse("package:${activity.packageName}")
-                    }
-                    activity.startActivity(intent)
-                    invoke.reject("Izin instalasi aplikasi dibutuhkan. Silakan aktifkan 'Izinkan dari sumber ini' lalu coba pasang kembali.")
-                    return@runOnUiThread
-                }
-
                 if (!apkFile.exists()) {
                     invoke.reject("File APK belum diunduh.")
                     return@runOnUiThread
