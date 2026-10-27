@@ -15,6 +15,7 @@ fn capture(pattern: &str, text: &str) -> Option<String> {
 /// Strip transport labels only at the beginning; preserve the actual merchant spelling.
 pub fn clean_merchant(value: &str) -> String {
     let prefix = Regex::new(r"(?i)^(?:(?:transaksi\s+)?pembayaran\s+qris(?:\s+(?:ke|kepada))?|transfer\s+(?:ke|dari)|(?:nama\s+)?merchant|(?:nama\s+)?penerima|pengirim|tujuan)(?:\s*[:\-–]\s*|\s+|$)").unwrap();
+    let location_suffix = Regex::new(r"(?i)\s*,\s*(?:CIMAUNG|BANDUNG|JAKARTA|SURABAYA|SEMARANG|YOGYAKARTA|MEDAN|TANGERANG|BEKASI|DEPOK|BOGOR|ID|INDONESIA)(?:[\s\-–]+(?:ID|INDONESIA))?$").unwrap();
     for line in value.lines() {
         let mut name = line.split_whitespace().collect::<Vec<_>>().join(" ");
         for _ in 0..8 {
@@ -23,6 +24,10 @@ pub fn clean_merchant(value: &str) -> String {
                 break;
             }
             name = next;
+        }
+        let cleaned = location_suffix.replace(&name, "").trim().to_owned();
+        if !cleaned.is_empty() {
+            return cleaned;
         }
         if !name.is_empty() {
             return name;
@@ -238,8 +243,9 @@ pub fn parse_message(input: &MailInput, account: &Account) -> Result<EmailRecord
             "Email melebihi batas 2 MiB; lampiran tidak diunduh. Periksa di aplikasi email.".into();
         return Ok(e);
     }
-    let bank_name = sender_bank(&e.sender).map(str::to_owned).unwrap_or_else(|| {
-        // Keep unknown senders separate for reference deduplication; no whitelist.
+    let bank_opt = sender_bank(&e.sender);
+    let is_known_bank = bank_opt.is_some();
+    let bank_name = bank_opt.map(str::to_owned).unwrap_or_else(|| {
         capture(r"<([^>]+)>", &e.sender)
             .unwrap_or_else(|| e.sender.trim().to_lowercase())
     });
@@ -250,8 +256,17 @@ pub fn parse_message(input: &MailInput, account: &Account) -> Result<EmailRecord
     let blocked = Regex::new(r"(?i)\b(?:gagal|failed|dibatalkan|cancelled|pending|tertunda|menunggu pembayaran|sedang diproses|belum berhasil|belum dibayar|jatuh tempo|promo|diskon|hingga|otp|kode verifikasi)\b").unwrap().is_match(&combined);
     let amount = transaction_amount(&combined);
     let direction = incoming != outgoing;
+
+    // Strict Filter: If sender is NOT a recognised Indonesian bank/wallet and there is NO explicit banking keyword, IGNORE IT!
+    let has_financial_context = is_known_bank || Regex::new(r"(?i)\b(?:qris|rekening|transfer|mutasi|saldo akhir|no\.?\s*referensi)\b").unwrap().is_match(&combined);
+    if !has_financial_context || (!incoming && !outgoing) {
+        e.status = "ignored".into();
+        e.reason = "Bukan email mutasi/transaksi perbankan.".into();
+        return Ok(e);
+    }
+
     let Some(amount) = amount else {
-        e.status = if incoming || outgoing || sender_bank(&e.sender).is_some() { "error" } else { "ignored" }.into();
+        e.status = if incoming || outgoing || is_known_bank { "error" } else { "ignored" }.into();
         e.reason = "Nominal transaksi belum jelas. Periksa bukti email.".into();
         return Ok(e);
     };
