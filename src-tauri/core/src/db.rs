@@ -422,6 +422,14 @@ impl Database {
         )?;
         Ok(0)
     }
+    /// Filter committed messages, not the global cursor, so broader ranges can backfill.
+    pub fn pending_uids(&self, account: &str, mailbox: &str, validity: u32, candidates: Vec<u32>) -> Result<Vec<u32>> {
+        let c = self.connection()?;
+        let mut q = c.prepare("SELECT uid FROM emails WHERE account_id=?1 AND mailbox=?2 AND uid_validity=?3 UNION SELECT uid FROM sync_receipts WHERE account_id=?1 AND mailbox=?2 AND uid_validity=?3")?;
+        let seen = q.query_map(params![account, mailbox, validity], |r| r.get::<_, u32>(0))?
+            .collect::<std::result::Result<std::collections::HashSet<_>, _>>()?;
+        Ok(candidates.into_iter().filter(|uid| !seen.contains(uid)).collect())
+    }
     pub fn mark_synced(&self, id: &str, folder: &str) -> Result<()> {
         self.connection()?.execute(
             "UPDATE accounts SET last_sync=?1,folder=?2 WHERE id=?3",
