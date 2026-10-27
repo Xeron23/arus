@@ -22,21 +22,7 @@ for (const [key, val] of [
     ? xml.replace(re, `android:${key}="${val}"`)
     : xml.replace(/<application\b/, `<application android:${key}="${val}"`);
 }
-if (!xml.includes("ArusNotificationService")) {
-  xml = xml.replace(
-    /<\/application>/,
-    `    <service
-            android:name="id.arus.notificationlistener.ArusNotificationService"
-            android:label="Arus — Pencatat Notifikasi Transaksi"
-            android:exported="false"
-            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
-            <intent-filter>
-                <action android:name="android.service.notification.NotificationListenerService" />
-            </intent-filter>
-        </service>
-    </application>`,
-  );
-}
+
 fs.writeFileSync(main, xml);
 const debug = "src-tauri/gen/android/app/src/debug/AndroidManifest.xml";
 fs.mkdirSync("src-tauri/gen/android/app/src/debug", { recursive: true });
