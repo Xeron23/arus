@@ -12,6 +12,25 @@ fn capture(pattern: &str, text: &str) -> Option<String> {
         .get(1)
         .map(|m| m.as_str().trim().to_owned())
 }
+/// Strip transport labels only at the beginning; preserve the actual merchant spelling.
+pub fn clean_merchant(value: &str) -> String {
+    let prefix = Regex::new(r"(?i)^(?:(?:transaksi\s+)?pembayaran\s+qris(?:\s+(?:ke|kepada))?|transfer\s+(?:ke|dari)|(?:nama\s+)?merchant|(?:nama\s+)?penerima|pengirim|tujuan)(?:\s*[:\-–]\s*|\s+|$)").unwrap();
+    for line in value.lines() {
+        let mut name = line.split_whitespace().collect::<Vec<_>>().join(" ");
+        for _ in 0..8 {
+            let next = prefix.replace(&name, "").trim().to_owned();
+            if next == name {
+                break;
+            }
+            name = next;
+        }
+        if !name.is_empty() {
+            return name;
+        }
+    }
+    String::new()
+}
+
 pub fn rupiah(text: &str) -> Option<i64> {
     let v = text
         .trim()
@@ -133,22 +152,29 @@ fn actual_time(text: &str) -> Option<String> {
     None
 }
 fn transaction_amount(text: &str) -> Option<i64> {
-    let label = Regex::new(r"(?i)\b(?:nominal|jumlah|total(?: pembayaran)?|amount)\s*:?\s*((?:Rp\.?\s*|IDR\s*)?[0-9][0-9.,]*)").unwrap();
-    let currency = Regex::new(r"(?i)\b(?:Rp\.?|IDR)\s*([0-9][0-9.,]*)").unwrap();
-    let excluded = Regex::new(r"(?i)\b(?:saldo|balance|limit|biaya admin|biaya transaksi|fee)\b").unwrap();
-    let mut labelled = std::collections::BTreeSet::new();
-    let mut currencies = std::collections::BTreeSet::new();
-    for line in text.lines().filter(|line| !excluded.is_match(line)) {
-        for caps in label.captures_iter(line) {
-            let raw = caps[1].trim().trim_start_matches("IDR").trim_start_matches("idr").trim();
-            if let Some(n) = rupiah(raw.trim_end_matches('.')) { labelled.insert(n); }
-        }
-        for caps in currency.captures_iter(line) {
-            if let Some(n) = rupiah(caps[1].trim_end_matches('.')) { currencies.insert(n); }
+    // 1. First priority: Look for labelled nominal patterns (Nominal, Jumlah, Total, Amount)
+    let label = Regex::new(r"(?im)\b(?:nominal|jumlah|total(?: pembayaran)?|amount)\s*:?\s*((?:Rp\.?\s*|IDR\s*)?[0-9][0-9.,]*)").unwrap();
+    let excluded = Regex::new(r"(?i)\b(?:saldo|balance|limit)\b").unwrap();
+    
+    for caps in label.captures_iter(text) {
+        let raw = caps[1].trim().trim_start_matches("IDR").trim_start_matches("idr").trim();
+        if let Some(n) = rupiah(raw.trim_end_matches('.')) {
+            return Some(n);
         }
     }
-    let values = if labelled.is_empty() { currencies } else { labelled };
-    if values.len() == 1 { values.into_iter().next() } else { None }
+
+    // 2. Second priority: Any line with Rp / IDR that does NOT mention saldo/balance
+    let currency = Regex::new(r"(?i)\b(?:Rp\.?|IDR)\s*([0-9][0-9.,]*)").unwrap();
+    let mut candidates = Vec::new();
+    for line in text.lines().filter(|line| !excluded.is_match(line)) {
+        for caps in currency.captures_iter(line) {
+            if let Some(n) = rupiah(caps[1].trim_end_matches('.')) {
+                candidates.push(n);
+            }
+        }
+    }
+    // Return the first candidate found
+    candidates.into_iter().next()
 }
 
 pub fn parse_message(input: &MailInput, account: &Account) -> Result<EmailRecord> {
@@ -231,8 +257,10 @@ pub fn parse_message(input: &MailInput, account: &Account) -> Result<EmailRecord
     };
     // Unknown or conflicting direction must never silently become an expense.
     let mut kind = if incoming && !outgoing { "income" } else { "expense" }.to_owned();
-    let merchant = capture(r"(?im)^(?:merchant|penerima|pengirim|pembayaran qris|transfer dari|transfer ke)\s*:?\s*(.+)$", &snippet)
-        .unwrap_or_else(|| if e.subject.trim().is_empty() { "Transaksi email".into() } else { e.subject.chars().take(200).collect() });
+    let merchant = capture(r"(?im)^(?:nama[ \t]+merchant|merchant|nama[ \t]+penerima|penerima|pengirim|tujuan|pembayaran[ \t]+qris|transfer[ \t]+dari|transfer[ \t]+ke)[ \t]*:?[ \t]*(?:\r?\n[ \t]*)?([^\r\n]+)", &snippet)
+        .map(|name| clean_merchant(&name))
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| if e.subject.trim().is_empty() { "Transaksi email".into() } else { clean_merchant(&e.subject) });
     let wallet_id = account
         .mappings
         .iter()
