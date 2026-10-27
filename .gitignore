@@ -1,0 +1,11 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/core/target/
+src-tauri/gen/
+*.db
+*.db-wal
+*.db-shm
+*.keystore
+*.jks
+.env*

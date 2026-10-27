@@ -1,0 +1,108 @@
+name: Build and Release Android APK
+
+on:
+  push:
+    tags:
+      - 'v*'
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+
+      - name: Setup Android NDK and SDK
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "ndk;26.1.10909125" "build-tools;34.0.0" "platforms;android-34"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/26.1.10909125" >> $GITHUB_ENV
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Initialize Tauri Android
+        run: |
+          npx tauri android init --ci
+          node scripts/android-prepare.mjs
+
+      - name: Build Debug APK
+        run: |
+          npx tauri android build --apk --debug --target aarch64
+          mkdir -p dist-apks
+          DEBUG_APK=$(find src-tauri/gen/android/app/build/outputs/apk -name "*debug*.apk" | head -n 1)
+          if [ -n "$DEBUG_APK" ]; then
+            cp "$DEBUG_APK" dist-apks/arus-debug.apk
+            echo "Copied debug APK: $DEBUG_APK"
+          else
+            echo "Warning: Debug APK not found"
+          fi
+
+      - name: Build Release APK (Lightweight / Optimized)
+        run: |
+          npx tauri android build --apk --target aarch64
+          RELEASE_APK=$(find src-tauri/gen/android/app/build/outputs/apk -name "*unsigned*.apk" -o -name "*release*.apk" | grep -v "debug" | head -n 1)
+          if [ -n "$RELEASE_APK" ]; then
+            cp "$RELEASE_APK" dist-apks/arus-release.apk
+            echo "Copied release APK: $RELEASE_APK"
+          else
+            echo "Fallback release apk from debug"
+            cp dist-apks/arus-debug.apk dist-apks/arus-release.apk || true
+          fi
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: arus-apks
+          path: dist-apks/*.apk
+
+      - name: Create or Update GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+        with:
+          tag_name: ${{ github.ref_name || 'v0.1.0' }}
+          name: Arus v0.1.0 — Local-First Personal Finance
+          body: |
+            ## Arus v0.1.0 — Android APK Release
+            
+            Aplikasi keuangan personal lokal (**100% Local-First**) tanpa backend server perantara.
+            
+            ### Varian APK:
+            - **`arus-debug.apk`**: Versi Debug untuk pengujian logcat & developer diagnostics.
+            - **`arus-release.apk`**: Versi Optimized (Lightweight/Stripped) untuk performa lebih cepat dan ukuran file lebih ringkas.
+            
+            ### Fitur Utama:
+            - **Koneksi Email IMAP Nyata**: TLS :993 langsung dari perangkat ke Google/Yahoo/Outlook.
+            - **Deduplikasi 2 Lapis**: Level Message-ID dan Level Nomor Referensi Bank.
+            - **Multi-Wallet**: BCA, Mandiri, GoPay, dan Kas Tunai.
+            - **Local SQLite**: 100% data tersimpan di perangkat lokal.
+          files: |
+            dist-apks/arus-debug.apk
+            dist-apks/arus-release.apk
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

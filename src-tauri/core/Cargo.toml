@@ -1,0 +1,27 @@
+[package]
+name = "arus-core"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.88"
+[dependencies]
+async-imap = { version = "=0.11.3", default-features = false, features = ["runtime-tokio"] }
+tokio = { version = "1", features = ["net", "time", "rt", "macros", "io-util"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+webpki-roots = "1"
+futures-util = "0.3"
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4"] }
+mailparse = "0.15"
+html2text = "0.12"
+regex = "1"
+sha2 = "0.10"
+zeroize = "1"
+thiserror = "2"
+[dev-dependencies]
+tempfile = "3"
+
+[workspace]
+
