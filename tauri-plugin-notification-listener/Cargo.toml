@@ -2,6 +2,7 @@
 name = "tauri-plugin-notification-listener"
 version = "0.1.0"
 edition = "2021"
+links = "tauri-plugin-notification-listener"
 
 [dependencies]
 tauri = { version = "2" }
