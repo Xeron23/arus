@@ -1,5 +1,4 @@
-use arus_core::models::EntryInput;
-use chrono::Utc;
+use arus_core::models::{NotificationImportReport, NotificationInput};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Manager};
@@ -16,19 +15,9 @@ pub struct NotificationStatus {
     pub last_error: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct RawNotification {
-    id: String,
-    package_name: String,
-    title: String,
-    text: String,
-    timestamp: i64,
-}
-
 #[derive(Debug, Deserialize)]
 struct Batch {
-    items: Vec<RawNotification>,
+    items: Vec<NotificationInput>,
 }
 
 #[tauri::command]
@@ -64,7 +53,9 @@ pub async fn notification_open_settings(app: AppHandle) -> Result<(), String> {
     {
         tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
             let plugin = app.state::<Native<tauri::Wry>>();
-            let _ = plugin.0.run_mobile_plugin::<Value>("openSettings", json!({}))
+            let _ = plugin
+                .0
+                .run_mobile_plugin::<Value>("openSettings", json!({}))
                 .map_err(|e| e.to_string())?;
             Ok(())
         })
@@ -84,7 +75,9 @@ pub async fn notification_set_enabled(app: AppHandle, enabled: bool) -> Result<(
     {
         tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
             let plugin = app.state::<Native<tauri::Wry>>();
-            let _ = plugin.0.run_mobile_plugin::<Value>("setEnabled", json!({ "enabled": enabled }))
+            let _ = plugin
+                .0
+                .run_mobile_plugin::<Value>("setEnabled", json!({ "enabled": enabled }))
                 .map_err(|e| e.to_string())?;
             Ok(())
         })
@@ -99,73 +92,32 @@ pub async fn notification_set_enabled(app: AppHandle, enabled: bool) -> Result<(
 }
 
 #[tauri::command]
-pub async fn notification_import(app: AppHandle) -> Result<usize, String> {
+pub async fn notification_import(app: AppHandle) -> Result<NotificationImportReport, String> {
     #[cfg(target_os = "android")]
     {
-        use arus_core::notification_parser::parse_notification;
         use crate::AppState;
-
-        let raw_batch: Value = tauri::async_runtime::spawn_blocking({
-            let app = app.clone();
-            move || {
-                let plugin = app.state::<Native<tauri::Wry>>();
-                plugin.0.run_mobile_plugin("peek", json!({}))
-            }
-        })
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())?;
-
-        let batch: Batch = serde_json::from_value(raw_batch).map_err(|e| e.to_string())?;
-        if batch.items.is_empty() {
-            return Ok(0);
-        }
-
-        let state = app.state::<AppState>();
-        let mut processed_ids = Vec::new();
-        let now = Utc::now().to_rfc3339();
-
-        for item in &batch.items {
-            if let Some(parsed) = parse_notification(&item.package_name, &item.title, &item.text) {
-                let wallet_id = parsed.wallet_hint.clone();
-                let category = if parsed.direction == "income" { "Pendapatan" } else { "Makanan & Minuman" };
-                let note = format!("Notifikasi: {} | {}", item.title, item.text);
-
-                let entry = EntryInput {
-                    wallet_id,
-                    to_wallet_id: None,
-                    kind: parsed.direction,
-                    amount: parsed.amount_idr,
-                    merchant: parsed.merchant,
-                    category: category.to_string(),
-                    occurred_at: now.clone(),
-                    note,
-                };
-
-                // Add to ledger via Database
-                let _ = state.db.add_manual(&entry);
-            }
-            processed_ids.push(item.id.clone());
-        }
-
-        // Ack processed IDs
-        if !processed_ids.is_empty() {
-            let _ = tauri::async_runtime::spawn_blocking({
-                let app = app.clone();
-                move || {
-                    let plugin = app.state::<Native<tauri::Wry>>();
-                    let _ = plugin.0.run_mobile_plugin::<Value>("ack", json!({ "ids": processed_ids }));
+        let native = app.clone();
+        tauri::async_runtime::spawn_blocking(move || -> Result<NotificationImportReport, String> {
+            let plugin = native.state::<Native<tauri::Wry>>();
+            let raw: Value = plugin.0.run_mobile_plugin("peek", json!({})).map_err(|e|e.to_string())?;
+            let batch: Batch = serde_json::from_value(raw).map_err(|e|e.to_string())?;
+            let state = native.state::<AppState>();
+            let imported = state.db.import_notifications(&batch.items);
+            let mut report = imported.report;
+            if !imported.ack_ids.is_empty() {
+                let count = imported.ack_ids.len();
+                match plugin.0.run_mobile_plugin::<Value>("ack", json!({"ids": imported.ack_ids})) {
+                    Ok(_) => report.acknowledged = count,
+                    Err(_) => report.warnings.push("Penyimpanan berhasil, tetapi ACK antrean gagal. Tarik ulang; receipt mencegah transaksi ganda.".into()),
                 }
-            })
-            .await;
-        }
-
-        Ok(batch.items.len())
+            }
+            Ok(report)
+        }).await.map_err(|e|e.to_string())?
     }
     #[cfg(not(target_os = "android"))]
     {
         let _ = app;
-        Ok(0)
+        Ok(NotificationImportReport::default())
     }
 }
 
@@ -188,7 +140,9 @@ pub async fn check_app_update(app: AppHandle) -> Result<UpdateInfo, String> {
     {
         let res = tauri::async_runtime::spawn_blocking(move || {
             let plugin = app.state::<Native<tauri::Wry>>();
-            plugin.0.run_mobile_plugin::<Value>("checkUpdate", json!({}))
+            plugin
+                .0
+                .run_mobile_plugin::<Value>("checkUpdate", json!({}))
         })
         .await
         .map_err(|e| e.to_string())?
@@ -219,7 +173,9 @@ pub async fn download_app_update(app: AppHandle) -> Result<bool, String> {
     {
         tauri::async_runtime::spawn_blocking(move || -> Result<bool, String> {
             let plugin = app.state::<Native<tauri::Wry>>();
-            let _ = plugin.0.run_mobile_plugin::<Value>("downloadUpdate", json!({}))
+            let _ = plugin
+                .0
+                .run_mobile_plugin::<Value>("downloadUpdate", json!({}))
                 .map_err(|e| e.to_string())?;
             Ok(true)
         })
@@ -239,7 +195,9 @@ pub async fn install_app_update(app: AppHandle) -> Result<bool, String> {
     {
         tauri::async_runtime::spawn_blocking(move || -> Result<bool, String> {
             let plugin = app.state::<Native<tauri::Wry>>();
-            let _ = plugin.0.run_mobile_plugin::<Value>("installUpdate", json!({}))
+            let _ = plugin
+                .0
+                .run_mobile_plugin::<Value>("installUpdate", json!({}))
                 .map_err(|e| e.to_string())?;
             Ok(true)
         })
@@ -253,31 +211,47 @@ pub async fn install_app_update(app: AppHandle) -> Result<bool, String> {
     }
 }
 
-
 #[tauri::command]
 pub async fn update_install_permission(app: AppHandle) -> Result<bool, String> {
     #[cfg(target_os = "android")]
     {
         tauri::async_runtime::spawn_blocking(move || {
-            let value = app.state::<Native<tauri::Wry>>().0
+            let value = app
+                .state::<Native<tauri::Wry>>()
+                .0
                 .run_mobile_plugin::<Value>("updateInstallPermission", json!({}))
                 .map_err(|e| e.to_string())?;
-            Ok(value.get("granted").and_then(Value::as_bool).unwrap_or(false))
-        }).await.map_err(|e| e.to_string())?
+            Ok(value
+                .get("granted")
+                .and_then(Value::as_bool)
+                .unwrap_or(false))
+        })
+        .await
+        .map_err(|e| e.to_string())?
     }
     #[cfg(not(target_os = "android"))]
-    { let _ = app; Ok(false) }
+    {
+        let _ = app;
+        Ok(false)
+    }
 }
 #[tauri::command]
 pub async fn update_install_settings(app: AppHandle) -> Result<(), String> {
     #[cfg(target_os = "android")]
     {
         tauri::async_runtime::spawn_blocking(move || {
-            app.state::<Native<tauri::Wry>>().0
+            app.state::<Native<tauri::Wry>>()
+                .0
                 .run_mobile_plugin::<Value>("updateInstallSettings", json!({}))
-                .map(|_| ()).map_err(|e| e.to_string())
-        }).await.map_err(|e| e.to_string())?
+                .map(|_| ())
+                .map_err(|e| e.to_string())
+        })
+        .await
+        .map_err(|e| e.to_string())?
     }
     #[cfg(not(target_os = "android"))]
-    { let _ = app; Err("Pemasangan pembaruan hanya tersedia di Android.".into()) }
+    {
+        let _ = app;
+        Err("Pemasangan pembaruan hanya tersedia di Android.".into())
+    }
 }

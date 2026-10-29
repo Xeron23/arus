@@ -563,6 +563,9 @@ export class MockAPI implements FinanceAPI {
   async resolve(input: Parameters<FinanceAPI["resolve"]>[0]) {
     await this.ready;
     const e = this.s.emails.find((e) => e.id === input.emailId);
+    if (e?.status === "posted" && input.action === "post" && this.s.transactions.some(
+      t => t.emailId === e.id && !this.data.deleted.includes(t.id),
+    )) return;
     if (!e || !["review", "error"].includes(e.status))
       throw Error("Email sudah diproses.");
     if (input.action === "ignore") e.status = "ignored";
@@ -641,18 +644,19 @@ export class MockAPI implements FinanceAPI {
     this.s.theme = theme;
     await this.save();
   }
+  private notificationEnabled = false;
   async notificationStatus() {
     return {
       granted: true,
-      enabled: true,
-      connected: true,
+      enabled: this.notificationEnabled,
+      connected: this.notificationEnabled,
       lastError: "",
     };
   }
   async notificationOpenSettings() {}
-  async notificationSetEnabled() {}
+  async notificationSetEnabled(enabled: boolean) { this.notificationEnabled = enabled; }
   async notificationImport() {
-    return 0;
+    return { posted: 0, review: 0, ignored: 0, duplicates: 0, failed: 0, acknowledged: 0, warnings: [] };
   }
   async checkUpdate() {
     return {

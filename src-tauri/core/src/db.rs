@@ -13,7 +13,7 @@ pub struct Database {
 fn newid() -> String {
     Uuid::new_v4().to_string()
 }
-fn audit(c: &Connection, action: &str, id: &str, detail: &str) -> Result<()> {
+pub(crate) fn audit(c: &Connection, action: &str, id: &str, detail: &str) -> Result<()> {
     c.execute(
         "INSERT INTO audit_log(action,entity_id,detail) VALUES(?1,?2,?3)",
         params![action, id, detail],
@@ -28,9 +28,29 @@ impl Database {
                 .map_err(|_| AppError::new("STORAGE", "Folder data aplikasi tidak dapat dibuat."))?
         }
         let db = Self { path };
-        let c = db.connection()?;
+        let mut c = db.connection()?;
         c.pragma_update(None, "journal_mode", "WAL")?;
-        c.execute_batch(include_str!("schema.sql"))?;
+        let version: u32 = c.pragma_query_value(None, "user_version", |r| r.get(0))?;
+        if version > 3 {
+            return Err(AppError::new(
+                "SCHEMA_VERSION",
+                "Database dibuat oleh versi Arus yang lebih baru.",
+            ));
+        }
+        let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let ledger_sql: Option<String> = tx
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='ledger'",
+                [],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if ledger_sql.is_some_and(|sql| !sql.contains("'Notification'")) {
+            tx.execute_batch(include_str!("migrations/003_notification_source.sql"))?;
+        }
+        tx.execute_batch(include_str!("schema.sql"))?;
+        tx.pragma_update(None, "user_version", 3)?;
+        tx.commit()?;
         for (id, name, kind, bank, digits) in [
             ("bca", "BCA Utama", "Bank", "BCA", ""),
             ("mandiri", "Mandiri Tabungan", "Bank", "Mandiri", ""),
@@ -105,6 +125,7 @@ impl Database {
             emails,
             accounts,
             theme,
+            notifications: crate::notifications::read_events(&c)?,
         })
     }
     pub fn accounts(&self) -> Result<Vec<Account>> {
@@ -310,6 +331,18 @@ impl Database {
             )
             .optional()?
             .ok_or_else(|| AppError::new("NOT_FOUND", "Email tidak ditemukan."))?;
+        // A retried confirmation after a lost IPC response must not insert again.
+        if status == "posted" && r.action == "post" {
+            let exists: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM ledger WHERE email_id=?1 AND deleted=0)",
+                [&r.email_id],
+                |row| row.get(0),
+            )?;
+            if exists {
+                tx.commit()?;
+                return Ok(());
+            }
+        }
         if !["review", "error"].contains(&status.as_str()) {
             return Err(AppError::new(
                 "CONFLICT",
@@ -340,13 +373,10 @@ impl Database {
                 validate_entry(&tx, e)?;
                 tx.execute("UPDATE ledger SET deleted=0,wallet_id=?1,to_wallet_id=?2,kind=?3,amount=?4,merchant=?5,category=?6,occurred_at=?7,note=?8 WHERE id=?9",params![e.wallet_id,e.to_wallet_id,e.kind,e.amount,e.merchant,category_for(e),e.occurred_at,e.note,id])?;
             } else {
-                // If reference exists, insert entry without reference constraint conflict on user manual review confirmation
-                let safe_ref = if reference_duplicate(&tx, &e.wallet_id, bank, reference)? {
-                    None
-                } else {
-                    reference
-                };
-                insert_entry(&tx, e, safe_ref, Some(&r.email_id), "Email", bank)?;
+                if reference_duplicate(&tx, &e.wallet_id, bank, reference)? {
+                    return Err(AppError::new("DUPLICATE_REFERENCE", "Referensi bank sudah dimiliki transaksi lain. Tidak ada transaksi baru yang dibuat."));
+                }
+                insert_entry(&tx, e, reference, Some(&r.email_id), "Email", bank)?;
             }
             tx.execute("UPDATE emails SET status='posted',reason='Dikonfirmasi dan dikoreksi pengguna' WHERE id=?1",[&r.email_id])?;
         } else {
@@ -411,12 +441,22 @@ impl Database {
         Ok(0)
     }
     /// Filter committed messages, not the global cursor, so broader ranges can backfill.
-    pub fn pending_uids(&self, account: &str, mailbox: &str, validity: u32, candidates: Vec<u32>) -> Result<Vec<u32>> {
+    pub fn pending_uids(
+        &self,
+        account: &str,
+        mailbox: &str,
+        validity: u32,
+        candidates: Vec<u32>,
+    ) -> Result<Vec<u32>> {
         let c = self.connection()?;
         let mut q = c.prepare("SELECT uid FROM emails WHERE account_id=?1 AND mailbox=?2 AND uid_validity=?3 UNION SELECT uid FROM sync_receipts WHERE account_id=?1 AND mailbox=?2 AND uid_validity=?3")?;
-        let seen = q.query_map(params![account, mailbox, validity], |r| r.get::<_, u32>(0))?
+        let seen = q
+            .query_map(params![account, mailbox, validity], |r| r.get::<_, u32>(0))?
             .collect::<std::result::Result<std::collections::HashSet<_>, _>>()?;
-        Ok(candidates.into_iter().filter(|uid| !seen.contains(uid)).collect())
+        Ok(candidates
+            .into_iter()
+            .filter(|uid| !seen.contains(uid))
+            .collect())
     }
     pub fn mark_synced(&self, id: &str, folder: &str) -> Result<()> {
         self.connection()?.execute(
@@ -455,19 +495,36 @@ impl Database {
                     occurred_at: p.occurred_at.clone(),
                     note: "Otomatis dari email; bukti asli tersimpan lokal".into(),
                 };
-                insert_entry(
-                    &tx,
-                    &e,
-                    p.reference.as_deref(),
-                    Some(&email.id),
-                    "Email",
-                    &p.bank,
-                )?;
-                if let Some(obs) = p.observed {
+                // Bad extracted data belongs in review; it must not roll back the evidence
+                // and repeatedly block every older UID on the next synchronization.
+                if let Err(error) = validate_entry(&tx, &e) {
+                    if error.code != "VALIDATION" {
+                        return Err(error);
+                    }
+                    email.status = "error".into();
+                    email.reason = format!(
+                        "{} Data email disimpan untuk koreksi manual.",
+                        error.message
+                    );
                     tx.execute(
-                        "UPDATE wallets SET observed=?1 WHERE id=?2",
-                        params![obs, p.wallet_id],
+                        "UPDATE emails SET status=?1,reason=?2 WHERE id=?3",
+                        params![email.status, email.reason, email.id],
                     )?;
+                } else {
+                    insert_entry(
+                        &tx,
+                        &e,
+                        p.reference.as_deref(),
+                        Some(&email.id),
+                        "Email",
+                        &p.bank,
+                    )?;
+                    if let Some(obs) = p.observed {
+                        tx.execute(
+                            "UPDATE wallets SET observed=?1 WHERE id=?2",
+                            params![obs, p.wallet_id],
+                        )?;
+                    }
                 }
             }
         }
@@ -549,7 +606,7 @@ fn validate_entry(c: &Connection, e: &EntryInput) -> Result<()> {
     }
     Ok(())
 }
-fn insert_entry(
+pub(crate) fn insert_entry(
     tx: &Connection,
     e: &EntryInput,
     reference: Option<&str>,

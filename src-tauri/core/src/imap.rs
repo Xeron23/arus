@@ -253,6 +253,7 @@ pub async fn sync<F: Fn(SyncProgress) + Send + Sync>(
     let gmail = caps.has_str("X-GM-EXT-1");
     let mut report = SyncReport::default();
     let search_query = range.search_query(chrono::Utc::now());
+    let mut in_flight_remaining = 0u32;
     let processing: Result<()> = async {
     for folder in &folders {
         emit(
@@ -287,6 +288,7 @@ pub async fn sync<F: Fn(SyncProgress) + Send + Sync>(
         let available = 200u32.saturating_sub(report.fetched) as usize;
         report.remaining += uids.len().saturating_sub(available) as u32;
         uids.truncate(available);
+        in_flight_remaining = uids.len() as u32;
         for (i, uid) in uids.into_iter().enumerate() {
             emit(
                 "fetch",
@@ -300,6 +302,7 @@ pub async fn sync<F: Fn(SyncProgress) + Send + Sync>(
                 let c = db.connection()?;
                 c.execute("INSERT OR IGNORE INTO sync_receipts(account_id,mailbox,uid_validity,uid) VALUES(?1,?2,?3,?4)", rusqlite::params![account.id,folder,validity,uid])?;
                 c.execute("UPDATE cursors SET last_uid=MAX(last_uid,?1) WHERE account_id=?2 AND mailbox=?3",rusqlite::params![uid,account.id,folder])?;
+                in_flight_remaining = in_flight_remaining.saturating_sub(1);
                 continue;
             }
             let size = meta.as_ref().and_then(|m| m.size).unwrap_or(u32::MAX);
@@ -337,6 +340,7 @@ pub async fn sync<F: Fn(SyncProgress) + Send + Sync>(
                 received_at: f.internal_date().map(|t| t.to_rfc3339()),
             };
             let disposition = db.ingest(&mail, account)?;
+            in_flight_remaining = in_flight_remaining.saturating_sub(1);
             report.fetched += 1;
             match disposition.as_str() {
                 "posted" => report.posted += 1,
@@ -360,6 +364,9 @@ pub async fn sync<F: Fn(SyncProgress) + Send + Sync>(
     }.await;
     let _ = timeout(Duration::from_secs(3), s.logout()).await;
     if let Err(e) = processing {
+        // Network/storage failures stop this connection, but uncommitted UIDs
+        // remain retryable. Domain validation errors are persisted by ingest.
+        report.remaining += in_flight_remaining;
         report.warnings.push(format!("{}: {}", e.code, e.message));
     }
     emit(

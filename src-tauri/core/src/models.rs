@@ -1,17 +1,28 @@
 use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
 pub enum SyncRange {
-    #[serde(rename = "7")] Week,
+    #[serde(rename = "7")]
+    Week,
     #[default]
-    #[serde(rename = "30")] Month,
-    #[serde(rename = "90")] Quarter,
-    #[serde(rename = "all")] All,
+    #[serde(rename = "30")]
+    Month,
+    #[serde(rename = "90")]
+    Quarter,
+    #[serde(rename = "all")]
+    All,
 }
 impl SyncRange {
     pub fn search_query(self, now: chrono::DateTime<chrono::Utc>) -> String {
-        let days = match self { Self::Week => 7, Self::Month => 30, Self::Quarter => 90, Self::All => return "ALL".into() };
+        let days = match self {
+            Self::Week => 7,
+            Self::Month => 30,
+            Self::Quarter => 90,
+            Self::All => return "ALL".into(),
+        };
         // IMAP SINCE is inclusive and has calendar-day precision, not rolling hours.
-        let date = (now.with_timezone(&chrono::FixedOffset::east_opt(7 * 3600).unwrap()) - chrono::Duration::days(days)).date_naive();
+        let date = (now.with_timezone(&chrono::FixedOffset::east_opt(7 * 3600).unwrap())
+            - chrono::Duration::days(days))
+        .date_naive();
         format!("SINCE {}", date.format("%d-%b-%Y"))
     }
 }
@@ -176,6 +187,44 @@ pub struct Snapshot {
     pub emails: Vec<EmailRecord>,
     pub accounts: Vec<Account>,
     pub theme: String,
+    pub notifications: Vec<NotificationEvent>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationInput {
+    pub id: String,
+    pub package_name: String,
+    pub title: String,
+    pub text: String,
+    pub timestamp: i64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationEvent {
+    #[serde(flatten)]
+    pub input: NotificationInput,
+    pub status: String,
+    pub reason: String,
+    pub ledger_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationImportReport {
+    pub posted: usize,
+    pub review: usize,
+    pub ignored: usize,
+    pub duplicates: usize,
+    pub failed: usize,
+    pub acknowledged: usize,
+    pub warnings: Vec<String>,
+}
+
+pub struct NotificationImportBatch {
+    pub report: NotificationImportReport,
+    pub ack_ids: Vec<String>,
 }
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

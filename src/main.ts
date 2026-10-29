@@ -215,7 +215,7 @@ function audit(id: string) {
       )
       .join(
         "",
-      )}<div class="audit-heading">${icon("shield")}Bukti email · hanya teks</div><pre class="raw-email">${esc(e.rawSnippet)}</pre><p class="tiny muted">${esc(e.reason)}</p>${canEdit ? `<form id="reviewForm"><div class="section-title"><h2>Koreksi sebelum dicatat</h2></div>${select("reviewKind", "Jenis mutasi", ["expense", "income", "transfer"].map((k) => `<option value="${k}" ${(p?.kind || "expense") === k ? "selected" : ""}>${k === "expense" ? "Keluar" : k === "income" ? "Masuk" : "Transfer internal"}</option>`).join(""))}<div id="reviewFields">${entryFields(d, p?.kind || "expense")}</div>${err()}<button class="primary" type="submit">${icon("check")}Konfirmasi & catat</button><div style="margin-top:9px">${btn("ignore-email", "Abaikan email", "secondary", id)}</div></form>` : `<div class="notice">Email ini ${e.status === "posted" ? "sudah tercatat" : "tidak mengubah saldo"}.</div>`}`,
+      )}<div class="audit-heading">${icon("shield")}Bukti email · hanya teks</div><pre class="raw-email">${esc(e.rawSnippet)}</pre><p class="tiny muted">${esc(e.reason)}</p>${canEdit ? `<form id="reviewForm"><div class="section-title"><h2>Koreksi sebelum dicatat</h2></div>${select("reviewKind", "Jenis mutasi", ["expense", "income", "transfer"].map((k) => `<option value="${k}" ${(p?.kind || "expense") === k ? "selected" : ""}>${k === "expense" ? "Keluar" : k === "income" ? "Masuk" : "Transfer internal"}</option>`).join(""))}<div id="reviewFields">${entryFields(d, p?.kind || "expense")}</div>${err()}<button class="primary" type="submit">${icon("check")}Konfirmasi & catat</button><div style="margin-top:9px">${btn("ignore-email", "Abaikan email", "secondary", id)}</div></form>` : `<div class="notice">Email ini ${e.status === "posted" ? "sudah tercatat" : "tidak mengubah saldo"}.</div>${e.status === "ignored" ? btn("reopen-email", "Buka kembali untuk review", "secondary", e.id) : ""}`}`,
     "Saldo hanya berubah saat transaksi dicatat.",
   );
 }
@@ -478,6 +478,30 @@ function showHelp() {
 function syncOptions() {
   sheet("Pilih periode email", `<p class="small muted">Pilih email yang ingin diperiksa. Email yang sudah diproses tidak dicatat ulang.</p>${select("syncRange", "Rentang waktu", syncRangeOptions())}<div class="notice">Semua email diproses bertahap, maksimal 200 email per akun dalam satu proses.</div>${btn("sync-start", "Mulai sinkronisasi", "primary")}`);
 }
+async function importNotifications(announce: boolean) {
+  if (busy) return;
+  busy = true;
+  try {
+    const r = await api.notificationImport();
+    if (r.posted || r.review || r.ignored) await refresh();
+    if (announce || r.failed || r.warnings.length) {
+      toast(`${r.posted} tercatat · ${r.review} tersimpan untuk diperiksa · ${r.duplicates} sudah pernah diproses · ${r.failed} gagal. ${r.warnings.join(" ")}`);
+    }
+  } finally { busy = false; }
+}
+function startNotificationPolling() {
+  if (!api.native) return;
+  const poll = async () => {
+    if (document.visibilityState !== "visible" || busy || !$("#overlay")?.classList.contains("hidden")) return;
+    try {
+      const status = await api.notificationStatus();
+      if (status.granted && status.enabled && $("#overlay")?.classList.contains("hidden")) await importNotifications(false);
+    } catch { /* Manual import reports failures; the native queue is retained. */ }
+  };
+  void poll();
+  setInterval(() => void poll(), 15000);
+  document.addEventListener("visibilitychange", () => void poll());
+}
 let downloadedUpdate = false;
 async function installDownloadedUpdate() {
   if (!downloadedUpdate) throw Error("Unduh pembaruan terlebih dahulu.");
@@ -560,7 +584,7 @@ document.addEventListener("click", async (e) => {
         toast("Transaksi dihapus.", () => api.deleteEntry(id, true));
         break;
       case "catat-semua": {
-        const pending = data.emails.filter((e) => e.status === "review");
+        const pending = data.emails.filter((e) => e.status === "review" && e.parsed?.confident);
         if (!pending.length) break;
         let count = 0;
         let errors = 0;
@@ -599,6 +623,11 @@ document.addEventListener("click", async (e) => {
         close();
         await refresh();
         toast("Email diabaikan.", () => api.undoReview(id));
+        break;
+      case "reopen-email":
+        await api.undoReview(id);
+        await refresh();
+        audit(id);
         break;
       case "kind-filter":
         view.kind = id;
@@ -741,10 +770,35 @@ document.addEventListener("click", async (e) => {
       case "notif-settings":
         await api.notificationOpenSettings();
         break;
+      case "notif-manage": {
+        const s = await api.notificationStatus();
+        sheet("Pengumpulan notifikasi", `<p class="small">Izin: ${s.granted ? "aktif" : "belum diberikan"} · Pengumpulan: ${s.enabled ? "aktif" : "nonaktif"} · Listener: ${s.connected ? "terhubung" : "belum terhubung"}</p><p class="small muted">Notifikasi disimpan di antrean perangkat. Saat aplikasi terbuka, impor berjalan setiap 15 detik.</p>${s.lastError ? `<div class="notice orange">${esc(s.lastError)}</div>` : ""}${btn("notif-toggle", s.enabled ? "Nonaktifkan pengumpulan" : "Aktifkan pengumpulan", "primary")}`);
+        break;
+      }
+      case "notif-toggle": {
+        const s = await api.notificationStatus();
+        if (!s.enabled && !s.granted) {
+          await api.notificationOpenSettings();
+          toast("Berikan izin, lalu kembali dan aktifkan pengumpulan notifikasi.");
+          break;
+        }
+        await api.notificationSetEnabled(!s.enabled);
+        close();
+        toast(s.enabled ? "Pengumpulan dinonaktifkan; antrean lama tetap tersimpan." : "Pengumpulan notifikasi aktif.");
+        break;
+      }
+      case "notif-history":
+        sheet("Arsip bukti notifikasi", (data.notifications || []).map(n => `<div class="card"><p class="small">${esc(n.status)} · ${esc(n.packageName)}</p>${btn("notif-event", esc(n.title || "Notifikasi"), "secondary", n.id)}<p class="tiny muted">${esc(n.reason)}</p></div>`).join("") || empty("Belum ada bukti", "Tarik notifikasi setelah mengaktifkan pengumpulan."));
+        break;
+      case "notif-event": {
+        const n = data.notifications?.find(n => n.id === id);
+        if (!n) throw Error("Bukti notifikasi tidak ditemukan. Tarik ulang daftar.");
+        const date = new Date(n.timestamp);
+        sheet("Bukti notifikasi", `<p class="small">${esc(n.packageName)} · ${Number.isNaN(date.valueOf()) ? "Waktu tidak valid" : dateText(date.toISOString())}</p><h3>${esc(n.title)}</h3><pre class="raw-email">${esc(n.text)}</pre><p class="small">${esc(n.reason)}</p>${n.status === "review" ? '<div class="notice">Bukti dipertahankan. Periksa bukti ini sebelum mencatat manual; pencatatan otomatis tidak dijalankan untuk format yang ambigu.</div>' : ""}`);
+        break;
+      }
       case "notif-sync": {
-        const count = await api.notificationImport();
-        await refresh();
-        toast(count ? `${count} notifikasi transaksi diproses.` : "Tidak ada notifikasi baru.");
+        await importNotifications(true);
         break;
       }
       case "check-update": {
@@ -983,7 +1037,10 @@ document.addEventListener("keydown", (e) => {
 });
 $("#app").innerHTML =
   '<div class="phone p-6"><div class="skeleton mt-20"></div><p class="text-center muted mt-8">Membuka buku kas lokal…</p></div>';
-loadAppVersion().catch(() => { /* Package version remains a safe fallback. */ }).then(refresh).catch((e) => {
+loadAppVersion().catch(() => { /* Package version remains a safe fallback. */ }).then(async () => {
+  await refresh();
+  startNotificationPolling();
+}).catch((e) => {
   $("#app").innerHTML =
     `<div class="p-8"><h1>Arus belum bisa dibuka</h1><p>${esc(errorText(e))}</p><button data-act="reload">Muat ulang</button></div>`;
 });
