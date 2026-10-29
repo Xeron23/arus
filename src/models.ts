@@ -23,7 +23,7 @@ export interface EntryInput {
 }
 export interface LedgerEntry extends EntryInput {
   id: string;
-  source: "Email" | "Manual";
+  source: "Email" | "Manual" | "Notification";
   reference: string | null;
   bank: string;
   emailId: string | null;
@@ -97,6 +97,26 @@ export interface Snapshot {
   emails: EmailRecord[];
   accounts: Account[];
   theme: Theme;
+  notifications?: NotificationEvent[];
+}
+export interface NotificationEvent {
+  id: string;
+  packageName: string;
+  title: string;
+  text: string;
+  timestamp: number;
+  status: "posted" | "review" | "ignored";
+  reason: string;
+  ledgerId: string | null;
+}
+export interface NotificationImportReport {
+  posted: number;
+  review: number;
+  ignored: number;
+  duplicates: number;
+  failed: number;
+  acknowledged: number;
+  warnings: string[];
 }
 export interface SyncProgress {
   phase: string;
@@ -174,7 +194,7 @@ export interface FinanceAPI {
   notificationStatus(): Promise<NotificationStatus>;
   notificationOpenSettings(): Promise<void>;
   notificationSetEnabled(enabled: boolean): Promise<void>;
-  notificationImport(): Promise<number>;
+  notificationImport(): Promise<NotificationImportReport>;
   checkUpdate(): Promise<UpdateInfo>;
   downloadUpdate(): Promise<boolean>;
   updateInstallPermission(): Promise<boolean>;

@@ -41,7 +41,9 @@ internal object NativeQueue {
     fun enabled(c: Context) = prefs(c).getBoolean("enabled", false)
 
     fun setEnabled(c: Context, enabled: Boolean) {
-        prefs(c).edit().putBoolean("enabled", enabled).apply()
+        check(prefs(c).edit().putBoolean("enabled", enabled).commit()) {
+            "Preferensi pengumpulan notifikasi gagal disimpan"
+        }
     }
 
     fun put(c: Context, payload: JSONObject) {
@@ -49,9 +51,17 @@ internal object NativeQueue {
             put("id", payload.getString("id"))
             put("payload", payload.toString())
         }
-        db(c).insertWithOnConflict(
+        val database = db(c)
+        database.insertWithOnConflict(
             "queue", null, values, SQLiteDatabase.CONFLICT_IGNORE
         )
+        // insertWithOnConflict may return -1 for both duplicates and failures.
+        // A matching durable row, not that return value, proves success.
+        database.rawQuery("SELECT payload FROM queue WHERE id = ?", arrayOf(payload.getString("id"))).use { cursor ->
+            check(cursor.moveToFirst() && cursor.getString(0) == payload.toString()) {
+                "QUEUE_WRITE_FAILED_OR_ID_CONFLICT"
+            }
+        }
     }
 
     fun peek(c: Context): JSONArray {

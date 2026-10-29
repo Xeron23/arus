@@ -27,6 +27,7 @@ jobs:
           targets: aarch64-linux-android
       - name: Install dependencies and validate
         run: |
+          set -euo pipefail
           npm ci
           node scripts/check-version.mjs
           npm test
