@@ -12,12 +12,35 @@ fn capture(pattern: &str, text: &str) -> Option<String> {
         .get(1)
         .map(|m| m.as_str().trim().to_owned())
 }
+fn is_generic_status_title(text: &str) -> bool {
+    let lower = text.trim().to_lowercase();
+    let lower = lower.trim_end_matches(['!', '.', ' ']);
+    matches!(
+        lower,
+        "pembayaran berhasil"
+            | "transaksi berhasil"
+            | "transfer berhasil"
+            | "pembayaran qris"
+            | "pembayaran qris berhasil"
+            | "resi transaksi"
+            | "resi transaksi pembayaran qris"
+            | "notifikasi transaksi"
+            | "payment successful"
+            | "transaction successful"
+            | "transaksi email"
+            | "livin' by mandiri"
+            | "bca mobile"
+    )
+}
+
 /// Strip transport labels only at the beginning; preserve the actual merchant spelling.
 pub fn clean_merchant(value: &str) -> String {
-    let prefix = Regex::new(r"(?i)^(?:(?:transaksi\s+)?pembayaran\s+qris(?:\s+(?:ke|kepada))?|transfer\s+(?:ke|dari)|(?:nama\s+)?merchant|(?:nama\s+)?penerima|pengirim|tujuan)(?:\s*[:\-–]\s*|\s+|$)").unwrap();
+    let prefix = Regex::new(r"(?i)^(?:(?:transaksi\s+)?pembayaran\s+qris(?:\s+(?:ke|kepada))?|transfer\s+(?:ke|dari)|(?:nama\s+)?merchant|(?:nama\s+)?penerima|pengirim|tujuan|penyedia\s+(?:barang\s*/\s*)?jasa)(?:\s*[:\-–]\s*|\s+|$)").unwrap();
     let location_suffix = Regex::new(r"(?i)\s*,\s*(?:CIMAUNG|BANDUNG|JAKARTA|SURABAYA|SEMARANG|YOGYAKARTA|MEDAN|TANGERANG|BEKASI|DEPOK|BOGOR|ID|INDONESIA)(?:[\s\-–]+(?:ID|INDONESIA))?$").unwrap();
     for line in value.lines() {
-        let mut name = line.split_whitespace().collect::<Vec<_>>().join(" ");
+        let trimmed = line.trim();
+        let stripped = trimmed.trim_start_matches(|c: char| c == '#' || c == '*' || c == '`' || c.is_whitespace());
+        let mut name = stripped.split_whitespace().collect::<Vec<_>>().join(" ");
         for _ in 0..8 {
             let next = prefix.replace(&name, "").trim().to_owned();
             if next == name {
@@ -350,10 +373,20 @@ pub fn parse_message(input: &MailInput, account: &Account) -> Result<EmailRecord
         "expense"
     }
     .to_owned();
-    let merchant = capture(r"(?im)^(?:nama[ \t]+merchant|merchant|nama[ \t]+penerima|penerima|pengirim|tujuan|pembayaran[ \t]+qris|transfer[ \t]+dari|transfer[ \t]+ke)[ \t]*:?[ \t]*(?:\r?\n[ \t]*)?([^\r\n]+)", &snippet)
-        .map(|name| clean_merchant(&name))
-        .filter(|name| !name.is_empty())
-        .unwrap_or_else(|| if e.subject.trim().is_empty() { "Transaksi email".into() } else { clean_merchant(&e.subject) });
+    let merchant = capture(
+        r"(?im)^[ \t]*(?:nama[ \t]+merchant|merchant(?:[ \t]+name)?|nama[ \t]+penerima|penerima(?:[ \t]+qris)?|pengirim|tujuan(?:[ \t]+transaksi)?|penyedia[ \t]+(?:barang[ \t]*/[ \t]*)?jasa|pembayaran[ \t]+qris|transfer[ \t]+dari|transfer[ \t]+ke|kepada|bayar[ \t]+ke)[ \t]*:?[ \t]*(?:[ \t]*\r?\n[ \t]*)*([^\r\n]+)",
+        &snippet,
+    )
+    .map(|name| clean_merchant(&name))
+    .filter(|name| !name.is_empty() && !is_generic_status_title(name))
+    .unwrap_or_else(|| {
+        let fallback = clean_merchant(&e.subject);
+        if fallback.is_empty() || is_generic_status_title(&fallback) {
+            format!("Transaksi {}", bank)
+        } else {
+            fallback
+        }
+    });
     let wallet_id = account
         .mappings
         .iter()

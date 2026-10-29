@@ -142,6 +142,16 @@ fn reference_labels_are_not_values_and_conflicts_need_review() {
 }
 
 #[test]
+fn mandiri_qris_merchant_extraction_multiline_heading() {
+    let (_dir, _db, a) = setup(true);
+    let body = "Pembayaran Berhasil\n\nDetail Transaksi:\nPenerima\n\n#### ALGO BANDUNG 2 - QRIS\nBandung (Kota - ID\n\nNominal Transaksi: Rp 3.500,00\nNo. Referensi: 610223552123";
+    let e = parser::parse_message(&mail(&a, 1, body), &a).unwrap();
+    let p = e.parsed.unwrap();
+    assert_eq!(p.merchant, "ALGO BANDUNG 2 - QRIS");
+    assert_eq!(p.amount, 3500);
+}
+
+#[test]
 fn bank_unknown_direction_is_retained_and_missing_amount_is_error() {
     let (_dir, _db, a) = setup(true);
     assert_eq!(
