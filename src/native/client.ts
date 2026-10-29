@@ -50,7 +50,7 @@ class NativeAPI implements FinanceAPI {
   notificationSetEnabled: FinanceAPI["notificationSetEnabled"] = (enabled) =>
     invoke("notification_set_enabled", { enabled });
   notificationImport: FinanceAPI["notificationImport"] = () =>
-    invoke<number>("notification_import");
+    invoke<import("../models").NotificationImportReport>("notification_import");
   checkUpdate: FinanceAPI["checkUpdate"] = () =>
     invoke<import("../models").UpdateInfo>("check_app_update");
   downloadUpdate: FinanceAPI["downloadUpdate"] = () => invoke<boolean>("download_app_update");

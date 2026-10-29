@@ -156,30 +156,99 @@ fn actual_time(text: &str) -> Option<String> {
     }
     None
 }
-fn transaction_amount(text: &str) -> Option<i64> {
-    // 1. First priority: Look for labelled nominal patterns (Nominal, Jumlah, Total, Amount)
-    let label = Regex::new(r"(?im)\b(?:nominal|jumlah|total(?: pembayaran)?|amount)\s*:?\s*((?:Rp\.?\s*|IDR\s*)?[0-9][0-9.,]*)").unwrap();
-    let excluded = Regex::new(r"(?i)\b(?:saldo|balance|limit)\b").unwrap();
-    
-    for caps in label.captures_iter(text) {
-        let raw = caps[1].trim().trim_start_matches("IDR").trim_start_matches("idr").trim();
-        if let Some(n) = rupiah(raw.trim_end_matches('.')) {
-            return Some(n);
-        }
-    }
+#[derive(Default, Debug)]
+pub(crate) struct AmountAnalysis {
+    pub amount: Option<i64>,
+    pub ambiguous: bool,
+}
 
-    // 2. Second priority: Any line with Rp / IDR that does NOT mention saldo/balance
-    let currency = Regex::new(r"(?i)\b(?:Rp\.?|IDR)\s*([0-9][0-9.,]*)").unwrap();
-    let mut candidates = Vec::new();
-    for line in text.lines().filter(|line| !excluded.is_match(line)) {
-        for caps in currency.captures_iter(line) {
-            if let Some(n) = rupiah(caps[1].trim_end_matches('.')) {
-                candidates.push(n);
+/// All distinct plausible amounts are considered. Fees, balances and item counts
+/// cannot win merely because they occur first in the message.
+pub(crate) fn transaction_amount(text: &str) -> AmountAnalysis {
+    use std::collections::BTreeSet;
+    use std::sync::LazyLock;
+    static LABEL: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+        r"(?i)\b(nominal(?:[ \t]+(?:transaksi|pembayaran|transfer))?|nilai[ \t]+(?:transaksi|pembayaran|transfer)|amount|jumlah(?:[ \t]+(?:transaksi|pembayaran|transfer))?|total(?:[ \t]+pembayaran)?)[ \t]*:?[ \t]*((?:Rp\.?|IDR)[ \t]*)?([0-9][0-9.,]*)"
+    ).unwrap()
+    });
+    static CURRENCY: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)\b(?:Rp\.?|IDR)[ \t]*([0-9][0-9.,]*)").unwrap());
+    static EXCLUDED: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)\b(?:saldo|balance|limit|biaya|fee|cashback|diskon)\b").unwrap()
+    });
+    static ACTION: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)\b(?:debit|debet|kredit|credit|transfer|pembayaran|nominal|amount|top[ \t]*up|dana[ \t]+(?:masuk|keluar|terkirim))\b").unwrap()
+    });
+    let mut values = BTreeSet::new();
+    let mut ambiguous = false;
+    for line in text.lines() {
+        if EXCLUDED.is_match(line) {
+            // A transaction and its balance on the same line need a bank-specific
+            // parser; skipping that whole line must not bless another amount.
+            if ACTION.is_match(line) && CURRENCY.captures_iter(line).count() > 1 {
+                ambiguous = true;
+            }
+            continue;
+        }
+        for caps in LABEL.captures_iter(line) {
+            let label = caps[1].to_ascii_lowercase();
+            let has_currency = caps.get(2).is_some();
+            if !has_currency && (label.starts_with("jumlah") || label == "total") {
+                ambiguous = true; // e.g. Jumlah: 2 may mean two items.
+                continue;
+            }
+            match rupiah(caps[3].trim_end_matches('.')) {
+                Some(n) => {
+                    values.insert(n);
+                }
+                None => ambiguous = true,
+            }
+        }
+        for caps in CURRENCY.captures_iter(line) {
+            match rupiah(caps[1].trim_end_matches('.')) {
+                Some(n) => {
+                    values.insert(n);
+                }
+                None => ambiguous = true,
             }
         }
     }
-    // Return the first candidate found
-    candidates.into_iter().next()
+    AmountAnalysis {
+        amount: values.first().copied(),
+        ambiguous: ambiguous || values.len() > 1,
+    }
+}
+
+fn bank_reference(text: &str) -> (Option<String>, bool) {
+    use std::collections::BTreeSet;
+    use std::sync::LazyLock;
+    static LABEL: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+        r"(?im)^[ \t]*(?:(?:no(?:mor)?\.?)[ \t]+)?(?:referensi|reference|ref|order[ \t]+id|mutasi)(?:[ \t]+(?:transaksi|bank|pembayaran|transfer))?[ \t]*[:#][ \t]*(?:\r?\n[ \t]*)?([^\r\n]+)"
+    ).unwrap()
+    });
+    static VALUE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^[A-Za-z0-9][A-Za-z0-9_/-]{3,99}$").unwrap());
+    let mut values = BTreeSet::new();
+    let mut invalid = false;
+    for caps in LABEL.captures_iter(text) {
+        let value = caps[1].trim();
+        if VALUE.is_match(value) && value.bytes().any(|b| b.is_ascii_digit()) {
+            values.insert(value.to_owned());
+        } else {
+            invalid = true;
+        }
+    }
+    let ambiguous = invalid || values.len() > 1;
+    (
+        if ambiguous {
+            None
+        } else {
+            values.into_iter().next()
+        },
+        ambiguous,
+    )
 }
 
 pub fn parse_message(input: &MailInput, account: &Account) -> Result<EmailRecord> {
@@ -246,8 +315,7 @@ pub fn parse_message(input: &MailInput, account: &Account) -> Result<EmailRecord
     let bank_opt = sender_bank(&e.sender);
     let is_known_bank = bank_opt.is_some();
     let bank_name = bank_opt.map(str::to_owned).unwrap_or_else(|| {
-        capture(r"<([^>]+)>", &e.sender)
-            .unwrap_or_else(|| e.sender.trim().to_lowercase())
+        capture(r"<([^>]+)>", &e.sender).unwrap_or_else(|| e.sender.trim().to_lowercase())
     });
     let bank = bank_name.as_str();
     let combined = format!("{}\n{}", e.subject, snippet);
@@ -257,21 +325,31 @@ pub fn parse_message(input: &MailInput, account: &Account) -> Result<EmailRecord
     let amount = transaction_amount(&combined);
     let direction = incoming != outgoing;
 
-    // Strict Filter: If sender is NOT a recognised Indonesian bank/wallet and there is NO explicit banking keyword, IGNORE IT!
-    let has_financial_context = is_known_bank || Regex::new(r"(?i)\b(?:qris|rekening|transfer|mutasi|saldo akhir|no\.?\s*referensi)\b").unwrap().is_match(&combined);
-    if !has_financial_context || (!incoming && !outgoing) {
+    // Unrecognised bank layouts are evidence to review, not permanent noise.
+    let has_financial_context = is_known_bank
+        || incoming
+        || outgoing
+        || Regex::new(r"(?i)\b(?:qris|rekening|transfer|mutasi|saldo akhir|no\.?\s*referensi)\b")
+            .unwrap()
+            .is_match(&combined);
+    if !has_financial_context {
         e.status = "ignored".into();
         e.reason = "Bukan email mutasi/transaksi perbankan.".into();
         return Ok(e);
     }
-
-    let Some(amount) = amount else {
-        e.status = if incoming || outgoing || is_known_bank { "error" } else { "ignored" }.into();
-        e.reason = "Nominal transaksi belum jelas. Periksa bukti email.".into();
+    let amount_ambiguous = amount.ambiguous;
+    let Some(amount) = amount.amount else {
+        e.status = "error".into();
+        e.reason = "Nominal transaksi belum jelas. Bukti disimpan untuk koreksi manual.".into();
         return Ok(e);
     };
     // Unknown or conflicting direction must never silently become an expense.
-    let mut kind = if incoming && !outgoing { "income" } else { "expense" }.to_owned();
+    let mut kind = if incoming && !outgoing {
+        "income"
+    } else {
+        "expense"
+    }
+    .to_owned();
     let merchant = capture(r"(?im)^(?:nama[ \t]+merchant|merchant|nama[ \t]+penerima|penerima|pengirim|tujuan|pembayaran[ \t]+qris|transfer[ \t]+dari|transfer[ \t]+ke)[ \t]*:?[ \t]*(?:\r?\n[ \t]*)?([^\r\n]+)", &snippet)
         .map(|name| clean_merchant(&name))
         .filter(|name| !name.is_empty())
@@ -304,10 +382,7 @@ pub fn parse_message(input: &MailInput, account: &Account) -> Result<EmailRecord
     } else {
         category(&merchant)
     };
-    let reference = capture(
-        r"(?im)(?:no\.?\s*)?(?:referensi|reference|ref|order id|no\.?\s*mutasi)\s*[:#]?\s*([A-Z0-9][A-Z0-9_/-]{3,100})",
-        &snippet,
-    );
+    let (reference, reference_ambiguous) = bank_reference(&snippet);
     let time = actual_time(&snippet);
     let observed = capture(
         r"(?im)saldo akhir\s*:?\s*((?:Rp\.?\s*)?[0-9][0-9.,]*)",
@@ -321,7 +396,7 @@ pub fn parse_message(input: &MailInput, account: &Account) -> Result<EmailRecord
         }
     });
     // Missing date/reference/category is no longer an auto-post blocker.
-    let confident = direction && !blocked;
+    let confident = direction && !blocked && !amount_ambiguous && !reference_ambiguous;
     let p = Parsed {
         bank: bank.into(),
         amount,
@@ -341,7 +416,7 @@ pub fn parse_message(input: &MailInput, account: &Account) -> Result<EmailRecord
         e.reason = "Tercatat otomatis dari email: nominal dan arah transaksi terbaca.".into()
     } else {
         e.reason = if !p.confident {
-            "Arah transaksi belum jelas atau pesan bukan transaksi selesai. Periksa bukti email."
+            "Nominal, referensi, atau arah transaksi belum pasti; periksa bukti sebelum mencatat."
         } else {
             "Siap dikonfirmasi; pencatatan otomatis atau akun belum aktif."
         }

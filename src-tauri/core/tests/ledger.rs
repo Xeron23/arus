@@ -123,21 +123,21 @@ fn review_balance_waits_for_approval_then_undo() {
     };
     db.resolve_review(&input).unwrap();
     assert_eq!(total(&db), -45000);
-    assert!(db.resolve_review(&input).is_err());
+    db.resolve_review(&input).unwrap(); // A retried confirmation is idempotent.
     db.undo_review(&id).unwrap();
     assert_eq!(total(&db), 0);
     db.resolve_review(&input).unwrap();
     assert_eq!(total(&db), -45000);
 }
 #[test]
-fn failed_ingest_does_not_advance_cursor_or_write_email() {
+fn invalid_extracted_wallet_is_saved_for_manual_review() {
     let (_d, db, mut a) = setup();
     a.wallet_id = "missing".into();
-    let m = mail(&a, 7, "broken", "BCA-BROKEN", "Indomaret");
+    let m = mail(&a, 7, "broken", "BCA-BROKEN-001", "Indomaret");
     db.cursor(&a.id, &m.mailbox, 1).unwrap();
-    assert!(db.ingest(&m, &a).is_err());
-    assert_eq!(db.cursor(&a.id, &m.mailbox, 1).unwrap(), 0);
-    assert!(db.snapshot().unwrap().emails.is_empty());
+    assert_eq!(db.ingest(&m, &a).unwrap(), "error");
+    assert_eq!(db.cursor(&a.id, &m.mailbox, 1).unwrap(), 7);
+    assert_eq!(db.snapshot().unwrap().emails.len(), 1);
     assert_eq!(total(&db), 0);
 }
 #[test]
@@ -194,4 +194,3 @@ fn no_password_column_or_secret_in_database() {
         .iter()
         .any(|n| n.contains("password") || n.contains("secret")));
 }
-
