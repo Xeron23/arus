@@ -54,7 +54,7 @@ describe("ledger interactions", () => {
     const s = seedSnapshot(),
       v = {
         page: "transactions" as const,
-        month: new Date().toISOString().slice(0, 7),
+        month: s.transactions[0].occurredAt.slice(0, 7),
         wallet: "bca",
         search: "indomaret",
         category: "shop",

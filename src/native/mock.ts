@@ -51,15 +51,15 @@ export function computeWallets(s: Snapshot, deleted: string[] = []) {
   }));
 }
 export function classifyMerchant(name: string) {
-  return /indomaret|alfamart|superindo|tokopedia/i.test(name)
-    ? "shop"
-    : /pertamina|spbu|grab|gojek/i.test(name)
-      ? "transport"
-      : /warteg|kopi|coffee|bakmi|resto|makan/i.test(name)
-        ? "food"
-        : /pln|sewa|internet/i.test(name)
-          ? "home"
-          : "other";
+  const clean = name.trim().toLowerCase();
+  if (!clean) return "other";
+  // Priority rules
+  if (/\b(?:xxi|cgv|cinepolis|bioskop|cinema|steam|spotify|netflix|disney|karaoke|billiard|futsal|badminton|konser|codashop|unipin)\b/i.test(clean)) return "fun";
+  if (/\b(?:laundry|cuci\s*koin|cuci\s*kiloan|pln|pdam|token\s*listrik|pulsa|paket\s*data|kuota|telkomsel|indosat|kost|kontrakan|galon|elpiji|gas)\b/i.test(clean)) return "home";
+  if (/\b(?:spbu|pertamina|shell|bensin|solar|pertalite|pertamax|parkir|parking|tol|toll|grab|gojek|maxim|indrive|taksi|krl|mrt|lrt|kai|kereta|bengkel|ahass|tambal\s*ban|cuci\s*motor|cuci\s*mobil)\b/i.test(clean)) return "transport";
+  if (/\b(?:warteg|kopi|coffee|cafe|bakmi|mie|ayam|bebek|soto|sate|padang|gacoan|hokben|mcd|kfc|burger|pizza|resto|makan|dapur|snack|roti|bakery|martabak|gorengan|boba|haus|chatime|mixue|steak|dimsum)\b/i.test(clean)) return "food";
+  if (/\b(?:indomaret|alfamart|alfamidi|superindo|transmart|hypermart|tokopedia|shopee|lazada|blibli|toko|shop|store|market|mall|swalayan|fashion|baju|distro|watsons|guardian|apotek|optik|ace\s*hardware|ikea|miniso|mr\s*diy|erafone)\b/i.test(clean)) return "shop";
+  return "other";
 }
 const id = () => {
   if (typeof crypto.randomUUID === "function") return crypto.randomUUID();

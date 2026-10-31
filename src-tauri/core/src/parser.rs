@@ -85,31 +85,7 @@ pub fn rupiah(text: &str) -> Option<i64> {
     }
 }
 pub fn category(name: &str) -> String {
-    let n = name.to_lowercase();
-    if ["indomaret", "alfamart", "superindo", "tokopedia", "shopee"]
-        .iter()
-        .any(|s| n.contains(s))
-    {
-        "shop"
-    } else if ["pertamina", "spbu", "grab", "gojek", "mrt"]
-        .iter()
-        .any(|s| n.contains(s))
-    {
-        "transport"
-    } else if ["warteg", "kopi", "coffee", "bakmi", "resto", "makan"]
-        .iter()
-        .any(|s| n.contains(s))
-    {
-        "food"
-    } else if ["pln", "sewa", "kost", "internet"]
-        .iter()
-        .any(|s| n.contains(s))
-    {
-        "home"
-    } else {
-        "other"
-    }
-    .into()
+    crate::classifier::classify(name)
 }
 fn plain(part: &ParsedMail<'_>) -> Option<String> {
     if part.ctype.mimetype == "text/plain" {

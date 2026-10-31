@@ -26,3 +26,8 @@ CREATE TABLE IF NOT EXISTS notification_events(
  reason TEXT NOT NULL, ledger_id TEXT UNIQUE REFERENCES ledger(id)
 );
 CREATE INDEX IF NOT EXISTS notification_status_idx ON notification_events(status,timestamp);
+CREATE TABLE IF NOT EXISTS merchant_rules(
+ merchant_key TEXT PRIMARY KEY,
+ category TEXT NOT NULL,
+ updated_at TEXT NOT NULL
+);

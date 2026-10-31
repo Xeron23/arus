@@ -130,3 +130,57 @@ fn bank_filter_ignores_unselected_bank() {
     assert_eq!(bca_rec.status, "ignored");
     assert!(bca_rec.reason.contains("tidak dipilih untuk disinkronkan"));
 }
+
+#[test]
+fn test_adaptive_learning_rules_in_db() {
+    let (_dir, db, mut account) = setup();
+    account.auto_post = false; // Need review status!
+    let mail1 = MailInput {
+        account_id: account.id.clone(),
+        mailbox: "INBOX".into(),
+        uid: 991,
+        uid_validity: 1,
+        gm_id: None,
+        oversized: false,
+        received_at: Some("2026-10-27T08:00:00+07:00".into()),
+        raw: "From: no-reply@bankmandiri.co.id\r\nMessage-ID: <mandiri-991>\r\nSubject: Pembayaran QRIS\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nDebit Rp50.000\nMerchant: PT Antah Berantah".as_bytes().to_vec(),
+    };
+    db.ingest(&mail1, &account).unwrap();
+    let s = db.snapshot().unwrap();
+    let email1 = s.emails.into_iter().find(|e| e.uid == 991).unwrap();
+    assert_eq!(email1.parsed.as_ref().unwrap().category, "other");
+
+    // User corrects it to "food"
+    let review_input = ReviewInput {
+        email_id: email1.id.clone(),
+        action: "post".into(),
+        entry: Some(EntryInput {
+            wallet_id: "cash".into(),
+            to_wallet_id: None,
+            kind: "expense".into(),
+            amount: 50000,
+            merchant: "PT Antah Berantah".into(),
+            category: "food".into(),
+            occurred_at: "2026-10-27T08:00:00+07:00".into(),
+            note: "".into(),
+        }),
+    };
+    db.resolve_review(&review_input).unwrap();
+
+    // Now a new email from the same merchant comes in
+    let mail2 = MailInput {
+        account_id: account.id.clone(),
+        mailbox: "INBOX".into(),
+        uid: 992,
+        uid_validity: 1,
+        gm_id: None,
+        oversized: false,
+        received_at: Some("2026-10-27T08:00:00+07:00".into()),
+        raw: "From: no-reply@bankmandiri.co.id\r\nMessage-ID: <mandiri-992>\r\nSubject: Pembayaran QRIS\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nDebit Rp75.000\nMerchant: PT Antah Berantah Cabang 2".as_bytes().to_vec(),
+    };
+    db.ingest(&mail2, &account).unwrap();
+    let s2 = db.snapshot().unwrap();
+    let email2 = s2.emails.into_iter().find(|e| e.uid == 992).unwrap();
+    // It should have learned and automatically classified as "food"!
+    assert_eq!(email2.parsed.unwrap().category, "food");
+}

@@ -378,6 +378,17 @@ impl Database {
                 }
                 insert_entry(&tx, e, reference, Some(&r.email_id), "Email", bank)?;
             }
+            // Save learning rule to merchant_rules
+            let key = e.merchant.trim().to_lowercase();
+            if !key.is_empty() && e.kind == "expense" {
+                let res = tx.execute(
+                    "INSERT INTO merchant_rules(merchant_key, category, updated_at) VALUES(?1, ?2, ?3) ON CONFLICT(merchant_key) DO UPDATE SET category=excluded.category, updated_at=excluded.updated_at",
+                    params![key, e.category, Utc::now().to_rfc3339()],
+                );
+                if let Err(err) = res {
+                    eprintln!("FAILED TO INSERT MERCHANT RULE: {:?}", err);
+                }
+            }
             tx.execute("UPDATE emails SET status='posted',reason='Dikonfirmasi dan dikoreksi pengguna' WHERE id=?1",[&r.email_id])?;
         } else {
             return Err(AppError::new("VALIDATION", "Aksi review tidak dikenal."));
@@ -477,6 +488,14 @@ impl Database {
         allowed_banks: Option<&[String]>,
     ) -> Result<String> {
         let mut email = parser::parse_message(input, account)?;
+        // If we have learned merchant rules, apply them to override default category
+        if let Ok(rules) = self.get_merchant_rules() {
+            if let Some(p) = &mut email.parsed {
+                if p.kind == "expense" {
+                    p.category = crate::classifier::classify_with_memory(&p.merchant, Some(&rules));
+                }
+            }
+        }
         if let Some(banks) = allowed_banks {
             if !banks.is_empty() {
                 if let Some(p) = &email.parsed {
@@ -552,6 +571,18 @@ impl Database {
         let result = email.status.clone();
         tx.commit()?;
         Ok(result)
+    }
+    pub fn get_merchant_rules(&self) -> Result<std::collections::HashMap<String, String>> {
+        let c = self.connection()?;
+        let mut stmt = c.prepare("SELECT merchant_key, category FROM merchant_rules")?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        let mut map = std::collections::HashMap::new();
+        for r in rows {
+            if let Ok((k, v)) = r {
+                map.insert(k, v);
+            }
+        }
+        Ok(map)
     }
 }
 fn advance(tx: &Transaction<'_>, m: &MailInput) -> Result<()> {
