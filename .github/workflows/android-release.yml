@@ -12,6 +12,7 @@ concurrency:
 jobs:
   build-android:
     runs-on: ubuntu-latest
+    environment: Prod
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -51,9 +52,10 @@ jobs:
           set -euo pipefail
           umask 077
           if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "Restoring keystore from ANDROID_KEYSTORE_BASE64 secret..."
             printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/arus-release.jks"
           else
-            echo "Generating consistent build keystore..."
+            echo "WARNING: ANDROID_KEYSTORE_BASE64 not found! Generating fallback build keystore..."
             keytool -genkeypair -v \
               -keystore "$RUNNER_TEMP/arus-release.jks" \
               -alias arus-key \
@@ -64,6 +66,8 @@ jobs:
               -keypass "aruspassword123" \
               -dname "CN=Arus Finance, OU=Mobile, O=Arus, L=Jakarta, ST=Jakarta, C=ID"
           fi
+          echo "Active signing certificate fingerprint:"
+          keytool -list -v -keystore "$RUNNER_TEMP/arus-release.jks" -storepass "aruspassword123" | grep "SHA256:"
       - name: Build and sign release APK
         shell: bash
         env:
