@@ -8,6 +8,7 @@ import {
   setSelectedBanks,
   toggleSyncBank,
   toggleAllBanks,
+  ranges,
 } from "./sync-options";
 import { installSheetGesture } from "./sheet-gesture";
 import "./styles.css";
@@ -39,6 +40,7 @@ import {
   localTime,
   transactionRows,
   filtered,
+  availableMonths,
   type View,
   type Page,
 } from "./ui/templates";
@@ -492,6 +494,128 @@ function syncOptions() {
     `<p class="small muted">Pilih rentang waktu dan bank yang ingin disinkronkan. Email yang sudah diproses tidak dicatat ulang.</p>${select("syncRange", "Rentang waktu", syncRangeOptions())}<div class="section-title" style="margin-top:16px"><h2>Pilih bank & provider</h2><button type="button" class="text-btn" data-act="toggle-all-banks">${allSelected ? "Batal Semua" : "Pilih Semua"}</button></div><div class="chips" style="flex-wrap:wrap;gap:6px;margin:8px 0 12px">${ALL_BANKS.map((b) => `<button type="button" class="chip ${selectedBanks.includes(b) ? "active" : ""}" data-act="toggle-bank" data-id="${esc(b)}">${esc(b)}</button>`).join("")}</div><div class="notice">${selectedBanks.length === 0 ? "Peringatan: Belum ada bank yang dipilih. Semua email akan dilewati." : `Aktif: ${selectedBanks.length} dari ${ALL_BANKS.length} bank/provider.`}</div><div class="notice">Semua email diproses bertahap, maksimal 200 email per akun dalam satu proses.</div><div style="margin-top:14px">${btn("sync-start", "Mulai sinkronisasi", "primary")}</div>`,
   );
 }
+
+function openMonthPicker() {
+  const months = availableMonths(data, view);
+  const currentMonth = today().slice(0, 7);
+  sheet(
+    "Pilih Periode Bulan",
+    `<p class="small muted">Pilih bulan untuk melihat transaksi dan laporan arus kas.</p><div class="picker-list" style="margin-top:12px">${months
+      .map((m) => {
+        const isSelected = view.month === m;
+        const isCurrent = m === currentMonth;
+        const name = new Date(m + "-01T12:00:00").toLocaleDateString("id-ID", {
+          month: "long",
+          year: "numeric",
+        });
+        const txCount = data.transactions.filter((t) => t.occurredAt.startsWith(m)).length;
+        return `<button type="button" class="picker-item ${isSelected ? "active" : ""}" data-act="select-month" data-id="${esc(m)}">
+          <span class="picker-icon ${isSelected ? "active" : ""}">${icon("receipt")}</span>
+          <div class="grow">
+            <div class="row between">
+              <strong>${esc(name)}</strong>
+              ${isCurrent ? '<span class="tag green-light">Bulan ini</span>' : ""}
+            </div>
+            <small>${txCount} transaksi tercatat</small>
+          </div>
+          ${isSelected ? `<span class="check-badge">${icon("check")}</span>` : ""}
+        </button>`;
+      })
+      .join("")}</div>`,
+    "Tampilan bulan aktif",
+  );
+}
+
+function openWalletPicker() {
+  const isAll = view.wallet === "all";
+  const totalBalance = data.wallets.reduce((acc, w) => acc + w.balance, 0);
+  sheet(
+    "Pilih Tampilan Dompet",
+    `<p class="small muted">Filter saldo dan aktivitas transaksi berdasarkan dompet akun.</p><div class="picker-list" style="margin-top:12px">
+      <button type="button" class="picker-item ${isAll ? "active" : ""}" data-act="select-wallet" data-id="all">
+        <span class="picker-icon ${isAll ? "active" : ""}">${icon("wallet")}</span>
+        <div class="grow">
+          <strong>Semua Dompet</strong>
+          <small>Total saldo: ${money(totalBalance)}</small>
+        </div>
+        ${isAll ? `<span class="check-badge">${icon("check")}</span>` : ""}
+      </button>
+      ${data.wallets
+        .map((w) => {
+          const isSelected = view.wallet === w.id;
+          return `<button type="button" class="picker-item ${isSelected ? "active" : ""}" data-act="select-wallet" data-id="${esc(w.id)}">
+            <span class="picker-badge">${esc(w.bank.slice(0, 3).toUpperCase())}</span>
+            <div class="grow">
+              <strong>${esc(w.name)}</strong>
+              <small>${esc(w.kind)}${w.digits ? ` · •••• ${esc(w.digits)}` : ""} · ${money(w.balance)}</small>
+            </div>
+            ${isSelected ? `<span class="check-badge">${icon("check")}</span>` : ""}
+          </button>`;
+        })
+        .join("")}
+    </div>`,
+    "Filter saldo dashboard",
+  );
+}
+
+function openSyncRangePicker() {
+  const current = getSyncRange();
+  sheet(
+    "Rentang Email",
+    `<p class="small muted">Tentukan berapa lama email transaksi ke belakang yang ingin diperiksa.</p><div class="picker-list" style="margin-top:12px">
+      ${ranges
+        .map(([val, label]) => {
+          const isSelected = current === val;
+          return `<button type="button" class="picker-item ${isSelected ? "active" : ""}" data-act="select-sync-range" data-id="${esc(val)}">
+            <span class="picker-icon ${isSelected ? "active" : ""}">${icon("clock")}</span>
+            <div class="grow">
+              <strong>${esc(label)}</strong>
+            </div>
+            ${isSelected ? `<span class="check-badge">${icon("check")}</span>` : ""}
+          </button>`;
+        })
+        .join("")}
+    </div>`,
+    "Preferensi sinkronisasi",
+  );
+}
+
+function filterModal() {
+  const catsList = [
+    ["all", "Semua kategori"],
+    ...Object.entries(cats).map(([k, c]) => [k, c.name]),
+  ];
+  const walletsList = [
+    ["all", "Semua dompet"],
+    ...data.wallets.map((w) => [w.id, w.name]),
+  ];
+  sheet(
+    "Filter Transaksi",
+    `<div class="section-title" style="margin-top:4px"><h2>Pilih Dompet</h2></div>
+    <div class="chips" style="flex-wrap:wrap;gap:6px;margin:8px 0 14px">
+      ${walletsList
+        .map(
+          ([id, name]) =>
+            `<button type="button" class="chip ${view.wallet === id ? "active" : ""}" data-act="set-filter-wallet" data-id="${esc(id)}">${esc(name)}</button>`,
+        )
+        .join("")}
+    </div>
+    <div class="section-title" style="margin-top:12px"><h2>Pilih Kategori</h2></div>
+    <div class="chips" style="flex-wrap:wrap;gap:6px;margin:8px 0 14px">
+      ${catsList
+        .map(
+          ([id, name]) =>
+            `<button type="button" class="chip ${view.category === id ? "active" : ""}" data-act="set-filter-cat" data-id="${esc(id)}">${esc(name)}</button>`,
+        )
+        .join("")}
+    </div>
+    <div class="button-row" style="margin-top:18px">
+      ${btn("reset-filters", "Reset filter", "secondary")}
+      <button type="button" class="primary" data-act="close-sheet">Selesai</button>
+    </div>`,
+    "Sesuaikan daftar transaksi",
+  );
+}
 async function importNotifications(announce: boolean) {
   if (busy) return;
   busy = true;
@@ -651,11 +775,47 @@ document.addEventListener("click", async (e) => {
         view.status = id;
         render();
         break;
+      case "open-month-picker":
+        openMonthPicker();
+        break;
+      case "select-month":
+        view.month = id;
+        close();
+        render();
+        break;
+      case "open-wallet-picker":
+        openWalletPicker();
+        break;
+      case "select-wallet":
+        view.wallet = id;
+        close();
+        render();
+        break;
+      case "open-sync-range-picker":
+        openSyncRangePicker();
+        break;
+      case "select-sync-range":
+        setSyncRange(id);
+        close();
+        render();
+        toast("Rentang email diperbarui.");
+        break;
       case "filters":
-        sheet(
-          "Filter transaksi",
-          `<form id="filterForm">${select("wallet", "Dompet", walletOptions(data, view.wallet, true))}${select("category", "Kategori", categoryOptions(view.category, "all", true))}<div class="button-row">${btn("reset-filters", "Reset", "secondary")}<button type="submit" class="primary">Terapkan</button></div></form>`,
-        );
+        filterModal();
+        break;
+      case "set-filter-wallet":
+        view.wallet = id;
+        filterModal();
+        render();
+        break;
+      case "set-filter-cat":
+        view.category = id;
+        filterModal();
+        render();
+        break;
+      case "close-sheet":
+        close();
+        render();
         break;
       case "reset-filters":
         view.wallet = "all";

@@ -341,13 +341,225 @@ a {
   width: 11px;
   height: 11px;
 }
-.date-select {
+.date-select-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 20px;
+  padding: 5px 10px;
+  background: #eaf0e5;
+  border: 1px solid #d5e2cf;
+  color: #244e40;
   font-size: 11px;
-  border: 0;
-  background: transparent;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+.date-select-btn:active {
+  background: #dce7d6;
+  transform: scale(0.98);
+}
+.date-select-btn .select-chevron {
+  display: inline-flex;
+  align-items: center;
+}
+.date-select-btn .select-chevron svg {
+  width: 9px;
+  height: 9px;
+  color: #63776b;
+  transform: rotate(90deg);
+}
+.wallet-select-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #d7e1da;
+  background: #ffffff18;
+  border: 1px solid #ffffff22;
+  border-radius: 30px;
+  font-size: 10px;
+  font-weight: 500;
+  padding: 4px 10px;
+  max-width: 155px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+.wallet-select-btn:active {
+  background: #ffffff28;
+  transform: scale(0.98);
+}
+.wallet-select-btn .select-chevron svg {
+  width: 8px;
+  height: 8px;
+  color: #bacdc0;
+  transform: rotate(90deg);
+}
+.field-select-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  margin-top: 4px;
+  transition: all 0.15s ease;
+}
+.field-select-btn:active {
+  background: var(--pale);
+  transform: scale(0.99);
+}
+.field-select-btn .select-chevron svg {
+  width: 12px;
+  height: 12px;
   color: var(--muted);
-  padding: 0 3px;
-  width: 111px;
+  transform: rotate(90deg);
+}
+.picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.picker-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  text-align: left;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-family: inherit;
+}
+.picker-item:active {
+  transform: scale(0.99);
+}
+.picker-item.active {
+  border-color: var(--green);
+  background: #f3f7f0;
+}
+.picker-item .picker-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: #f0f4ec;
+  color: var(--green);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+.picker-item.active .picker-icon {
+  background: var(--green);
+  color: #fff;
+}
+.picker-item .picker-icon svg {
+  width: 16px;
+  height: 16px;
+}
+.picker-item .picker-badge {
+  width: 36px;
+  height: 34px;
+  border-radius: 10px;
+  background: #244e40;
+  color: #cfe9a7;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+}
+.picker-item .grow {
+  min-width: 0;
+  flex: 1;
+}
+.picker-item strong {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+}
+.picker-item small {
+  display: block;
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.picker-item .check-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--green);
+  color: #fff;
+  flex-shrink: 0;
+}
+.picker-item .check-badge svg {
+  width: 12px;
+  height: 12px;
+}
+.tag.green-light {
+  background: #e4efe0;
+  color: #2f5a49;
+  font-size: 9px;
+  padding: 2px 7px;
+  border-radius: 10px;
+  font-weight: 600;
+}
+.dark .date-select-btn {
+  background: #27392b;
+  border-color: #384e3d;
+  color: #e2eae1;
+}
+.dark .date-select-btn .select-chevron svg {
+  color: #a4b8aa;
+}
+.dark .wallet-select-btn {
+  color: #e0ead6;
+  background: #ffffff1f;
+  border-color: #ffffff29;
+}
+.dark .field-select-btn {
+  background: #202b23;
+  border-color: #2e3e33;
+  color: #e2eae1;
+}
+.dark .picker-item {
+  background: #202b23;
+  border-color: #2e3e33;
+  color: #e2eae1;
+}
+.dark .picker-item.active {
+  background: #283a2c;
+  border-color: #9bae76;
+}
+.dark .picker-item .picker-icon {
+  background: #2a3a2d;
+  color: #a8be88;
+}
+.dark .picker-item.active .picker-icon {
+  background: #9bae76;
+  color: #1a3026;
+}
+.dark .picker-item .check-badge {
+  background: #9bae76;
+  color: #1a3026;
+}
+.dark .tag.green-light {
+  background: #2e4435;
+  color: #cfe9a7;
 }
 .hero {
   position: relative;

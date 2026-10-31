@@ -67,6 +67,12 @@ export function toggleAllBanks(): string[] {
   return updated;
 }
 
+export function getCurrentSyncRangeLabel(): string {
+  const current = getSyncRange();
+  const found = ranges.find(([val]) => val === current);
+  return found ? found[1] : "30 hari terakhir";
+}
+
 export function syncRangeOptions(): string {
   return ranges.map(([value, label]) =>
     `<option value="${value}" ${value === selected ? "selected" : ""}>${label}</option>`
