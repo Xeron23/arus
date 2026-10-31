@@ -98,3 +98,35 @@ fn range_queries_are_calendar_days_in_jakarta_and_all_has_no_date_filter() {
     assert_eq!(SyncRange::All.search_query(now), "ALL");
     assert!(serde_json::from_str::<SyncRange>("\"365\"").is_err());
 }
+
+#[test]
+fn bank_filter_ignores_unselected_bank() {
+    let (_dir, db, account) = setup();
+    let mandiri_mail = MailInput {
+        account_id: account.id.clone(),
+        mailbox: "INBOX".into(),
+        uid: 501,
+        uid_validity: 1,
+        gm_id: None,
+        oversized: false,
+        received_at: Some("2026-10-27T08:00:00+07:00".into()),
+        raw: "From: no-reply@bankmandiri.co.id\r\nMessage-ID: <mandiri-501>\r\nSubject: Pembayaran Berhasil\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nDebit Rp18.500".as_bytes().to_vec(),
+    };
+    let bca_mail = MailInput {
+        account_id: account.id.clone(),
+        mailbox: "INBOX".into(),
+        uid: 502,
+        uid_validity: 1,
+        gm_id: None,
+        oversized: false,
+        received_at: Some("2026-10-27T08:00:00+07:00".into()),
+        raw: "From: alert@bca.co.id\r\nMessage-ID: <bca-502>\r\nSubject: Pembayaran Berhasil\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nDebit Rp25.000".as_bytes().to_vec(),
+    };
+    let filter = vec!["Mandiri".to_string()];
+    assert_eq!(db.ingest_with_banks(&mandiri_mail, &account, Some(&filter)).unwrap(), "posted");
+    assert_eq!(db.ingest_with_banks(&bca_mail, &account, Some(&filter)).unwrap(), "ignored");
+    let s = db.snapshot().unwrap();
+    let bca_rec = s.emails.into_iter().find(|e| e.uid == 502).unwrap();
+    assert_eq!(bca_rec.status, "ignored");
+    assert!(bca_rec.reason.contains("tidak dipilih untuk disinkronkan"));
+}

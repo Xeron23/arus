@@ -183,6 +183,7 @@ export interface FinanceAPI {
     accountId: string | null,
     onProgress: (progress: SyncProgress) => void,
     range?: SyncRange,
+    banks?: string[],
   ): Promise<SyncReport>;
   manual(input: EntryInput): Promise<string>;
   deleteEntry(id: string, undo: boolean): Promise<void>;

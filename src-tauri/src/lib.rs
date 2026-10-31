@@ -102,6 +102,7 @@ async fn sync_email_transactions(
     account_id: Option<String>,
     on_progress: Channel<SyncProgress>,
     range: Option<SyncRange>,
+    banks: Option<Vec<String>>,
 ) -> Result<SyncReport> {
     let gate = state.sync_gate.clone();
     let _guard = gate
@@ -138,7 +139,7 @@ async fn sync_email_transactions(
         };
         match imap::sync(&state.db, &a, password, &|p| {
             let _ = on_progress.send(p);
-        }, range.unwrap_or_default())
+        }, range.unwrap_or_default(), banks.clone())
         .await
         {
             Ok(r) => {

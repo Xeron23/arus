@@ -467,7 +467,26 @@ impl Database {
     }
     /// The email, optional ledger entry, and cursor are committed together.
     pub fn ingest(&self, input: &MailInput, account: &Account) -> Result<String> {
+        self.ingest_with_banks(input, account, None)
+    }
+
+    pub fn ingest_with_banks(
+        &self,
+        input: &MailInput,
+        account: &Account,
+        allowed_banks: Option<&[String]>,
+    ) -> Result<String> {
         let mut email = parser::parse_message(input, account)?;
+        if let Some(banks) = allowed_banks {
+            if !banks.is_empty() {
+                if let Some(p) = &email.parsed {
+                    if !banks.iter().any(|b| b.eq_ignore_ascii_case(&p.bank)) {
+                        email.status = "ignored".into();
+                        email.reason = format!("Dilewati: Bank {} tidak dipilih untuk disinkronkan.", p.bank);
+                    }
+                }
+            }
+        }
         let mut c = self.connection()?;
         let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let duplicate:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM emails WHERE account_id=?1 AND (message_id=?2 OR (?3 IS NOT NULL AND gm_id=?3) OR (mailbox=?4 AND uid_validity=?5 AND uid=?6)))",params![email.account_id,email.message_id,email.gm_id,email.mailbox,email.uid_validity,email.uid],|r|r.get(0))?;

@@ -221,6 +221,7 @@ pub async fn sync<F: Fn(SyncProgress) + Send + Sync>(
     password: Zeroizing<String>,
     progress: &F,
     range: SyncRange,
+    banks: Option<Vec<String>>,
 ) -> Result<SyncReport> {
     let ep = endpoint(ConnectionInput {
         email: account.email.clone(),
@@ -339,7 +340,7 @@ pub async fn sync<F: Fn(SyncProgress) + Send + Sync>(
                 oversized,
                 received_at: f.internal_date().map(|t| t.to_rfc3339()),
             };
-            let disposition = db.ingest(&mail, account)?;
+            let disposition = db.ingest_with_banks(&mail, account, banks.as_deref())?;
             in_flight_remaining = in_flight_remaining.saturating_sub(1);
             report.fetched += 1;
             match disposition.as_str() {

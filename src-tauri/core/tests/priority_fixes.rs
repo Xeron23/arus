@@ -152,6 +152,16 @@ fn mandiri_qris_merchant_extraction_multiline_heading() {
 }
 
 #[test]
+fn mandiri_livin_qris_merchant_extraction_with_header_and_hashes() {
+    let (_dir, _db, a) = setup(true);
+    let body = "Pembayaran QRIS\nPembayaran Berhasil!\n________________________________________\nDetail Transaksi:\nPenerima\n\n##### Laundry Box, DYHKLT\n\nBANDUNG - ID\n\nNominal Transaksi: Rp 18.500,00\nNo. Referensi: 987654321";
+    let e = parser::parse_message(&mail(&a, 1, body), &a).unwrap();
+    let p = e.parsed.unwrap();
+    assert_eq!(p.merchant, "Laundry Box, DYHKLT");
+    assert_eq!(p.amount, 18500);
+}
+
+#[test]
 fn bank_unknown_direction_is_retained_and_missing_amount_is_error() {
     let (_dir, _db, a) = setup(true);
     assert_eq!(

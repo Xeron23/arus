@@ -388,6 +388,7 @@ export class MockAPI implements FinanceAPI {
     accountId: string | null,
     onProgress: Parameters<FinanceAPI["sync"]>[1],
     range: import("../models").SyncRange = "30",
+    banks?: string[],
   ): Promise<SyncReport> {
     await this.ready;
     if (this.syncing) throw Error("Sinkronisasi sedang berjalan.");
@@ -483,6 +484,10 @@ export class MockAPI implements FinanceAPI {
           continue;
         }
         this.data.seen.push(e.messageId);
+        if (banks && banks.length > 0 && e.parsed?.bank && !banks.some((b) => b.toLowerCase() === e.parsed!.bank.toLowerCase())) {
+          e.status = "ignored";
+          e.reason = `Dilewati: Bank ${e.parsed.bank} tidak dipilih untuk disinkronkan.`;
+        }
         if (
           e.parsed?.reference &&
           this.s.transactions.some(

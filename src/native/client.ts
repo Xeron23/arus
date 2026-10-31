@@ -22,13 +22,14 @@ class NativeAPI implements FinanceAPI {
     invoke("lock_email_account", { accountId });
   updateAccount: FinanceAPI["updateAccount"] = (input) =>
     invoke("update_email_account", { input });
-  sync: FinanceAPI["sync"] = (accountId, fn, range = "30") => {
+  sync: FinanceAPI["sync"] = (accountId, fn, range = "30", banks) => {
     const onProgress = new Channel<SyncProgress>();
     onProgress.onmessage = fn;
     return invoke<SyncReport>("sync_email_transactions", {
       accountId,
       onProgress,
       range,
+      banks,
     });
   };
   manual: FinanceAPI["manual"] = (input) =>

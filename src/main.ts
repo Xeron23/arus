@@ -1,5 +1,14 @@
 import { appVersion, loadAppVersion } from "./version";
-import { getSyncRange, setSyncRange, syncRangeOptions } from "./sync-options";
+import {
+  getSyncRange,
+  setSyncRange,
+  syncRangeOptions,
+  ALL_BANKS,
+  getSelectedBanks,
+  setSelectedBanks,
+  toggleSyncBank,
+  toggleAllBanks,
+} from "./sync-options";
 import { installSheetGesture } from "./sheet-gesture";
 import "./styles.css";
 import { api, errorText } from "./native/client";
@@ -370,7 +379,7 @@ async function sync() {
       const inline = $("#syncInline");
       if (inline)
         inline.innerHTML = `<div class="sync-inline"><p class="tiny muted">${esc(p.message)}</p><div class="progress"><span style="width:${p.total ? Math.round((p.current / p.total) * 100) : 10}%"></span></div></div>`;
-    }, getSyncRange());
+    }, getSyncRange(), getSelectedBanks());
     await refresh();
     sheet(
       "Sinkronisasi selesai",
@@ -476,7 +485,12 @@ function showHelp() {
   );
 }
 function syncOptions() {
-  sheet("Pilih periode email", `<p class="small muted">Pilih email yang ingin diperiksa. Email yang sudah diproses tidak dicatat ulang.</p>${select("syncRange", "Rentang waktu", syncRangeOptions())}<div class="notice">Semua email diproses bertahap, maksimal 200 email per akun dalam satu proses.</div>${btn("sync-start", "Mulai sinkronisasi", "primary")}`);
+  const selectedBanks = getSelectedBanks();
+  const allSelected = selectedBanks.length === ALL_BANKS.length;
+  sheet(
+    "Pilih sinkronisasi email",
+    `<p class="small muted">Pilih rentang waktu dan bank yang ingin disinkronkan. Email yang sudah diproses tidak dicatat ulang.</p>${select("syncRange", "Rentang waktu", syncRangeOptions())}<div class="section-title" style="margin-top:16px"><h2>Pilih bank & provider</h2><button type="button" class="text-btn" data-act="toggle-all-banks">${allSelected ? "Batal Semua" : "Pilih Semua"}</button></div><div class="chips" style="flex-wrap:wrap;gap:6px;margin:8px 0 12px">${ALL_BANKS.map((b) => `<button type="button" class="chip ${selectedBanks.includes(b) ? "active" : ""}" data-act="toggle-bank" data-id="${esc(b)}">${esc(b)}</button>`).join("")}</div><div class="notice">${selectedBanks.length === 0 ? "Peringatan: Belum ada bank yang dipilih. Semua email akan dilewati." : `Aktif: ${selectedBanks.length} dari ${ALL_BANKS.length} bank/provider.`}</div><div class="notice">Semua email diproses bertahap, maksimal 200 email per akun dalam satu proses.</div><div style="margin-top:14px">${btn("sync-start", "Mulai sinkronisasi", "primary")}</div>`,
+  );
 }
 async function importNotifications(announce: boolean) {
   if (busy) return;
@@ -830,6 +844,14 @@ document.addEventListener("click", async (e) => {
         try { await installDownloadedUpdate(); } finally { busy = false; }
         break;
       case "sync":
+        syncOptions();
+        break;
+      case "toggle-bank":
+        toggleSyncBank(id);
+        syncOptions();
+        break;
+      case "toggle-all-banks":
+        toggleAllBanks();
         syncOptions();
         break;
       case "sync-start":

@@ -9,3 +9,4 @@ src-tauri/gen/
 *.keystore
 *.jks
 .env*
+Cargo.lock

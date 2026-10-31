@@ -39,7 +39,7 @@ pub fn clean_merchant(value: &str) -> String {
     let location_suffix = Regex::new(r"(?i)\s*,\s*(?:CIMAUNG|BANDUNG|JAKARTA|SURABAYA|SEMARANG|YOGYAKARTA|MEDAN|TANGERANG|BEKASI|DEPOK|BOGOR|ID|INDONESIA)(?:[\s\-–]+(?:ID|INDONESIA))?$").unwrap();
     for line in value.lines() {
         let trimmed = line.trim();
-        let stripped = trimmed.trim_start_matches(|c: char| c == '#' || c == '*' || c == '`' || c.is_whitespace());
+        let stripped = trimmed.trim_matches(|c: char| c == '#' || c == '*' || c == '`' || c.is_whitespace());
         let mut name = stripped.split_whitespace().collect::<Vec<_>>().join(" ");
         for _ in 0..8 {
             let next = prefix.replace(&name, "").trim().to_owned();
@@ -373,12 +373,15 @@ pub fn parse_message(input: &MailInput, account: &Account) -> Result<EmailRecord
         "expense"
     }
     .to_owned();
-    let merchant = capture(
+    let merchant = Regex::new(
         r"(?im)^[ \t]*(?:nama[ \t]+merchant|merchant(?:[ \t]+name)?|nama[ \t]+penerima|penerima(?:[ \t]+qris)?|pengirim|tujuan(?:[ \t]+transaksi)?|penyedia[ \t]+(?:barang[ \t]*/[ \t]*)?jasa|pembayaran[ \t]+qris|transfer[ \t]+dari|transfer[ \t]+ke|kepada|bayar[ \t]+ke)[ \t]*:?[ \t]*(?:[ \t]*\r?\n[ \t]*)*([^\r\n]+)",
-        &snippet,
     )
-    .map(|name| clean_merchant(&name))
-    .filter(|name| !name.is_empty() && !is_generic_status_title(name))
+    .ok()
+    .and_then(|re| {
+        re.captures_iter(&snippet)
+            .filter_map(|caps| caps.get(1).map(|m| clean_merchant(m.as_str().trim())))
+            .find(|name| !name.is_empty() && !is_generic_status_title(name))
+    })
     .unwrap_or_else(|| {
         let fallback = clean_merchant(&e.subject);
         if fallback.is_empty() || is_generic_status_title(&fallback) {
