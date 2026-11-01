@@ -111,6 +111,7 @@ describe("budget guard ui", () => {
     const html = budgetSection(snapshot, view);
     expect(html).toContain("Target Anggaran Bulanan");
     expect(html).toContain("Belum ada target anggaran");
+    expect(html).toContain("Atur Target Sekarang");
     expect(html).toContain("budget-new");
   });
 

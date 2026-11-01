@@ -1306,12 +1306,17 @@ a {
 }
 .empty-budget-card {
   display: flex;
-  align-items: center;
-  gap: 14px;
+  flex-direction: column;
   padding: 16px;
   margin-bottom: 16px;
   border: 1px dashed var(--line);
   background: var(--paper-hover, #fbfcf9);
+  cursor: pointer;
+}
+.empty-budget-top {
+  display: flex;
+  align-items: center;
+  gap: 14px;
 }
 .empty-budget-icon {
   width: 40px;

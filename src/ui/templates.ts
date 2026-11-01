@@ -232,12 +232,14 @@ export function budgetSection(s: Snapshot, v: View) {
   </div>${
     cards ||
     `<div class="card empty-budget-card" data-act="budget-new">
-      <div class="empty-budget-icon">${icon("budget")}</div>
-      <div class="grow">
-        <h3 class="strong" style="font-size:13px">Belum ada target anggaran</h3>
-        <p class="tiny muted" style="margin-top:2px">Tetapkan limit pengeluaran (misal: Makan & Minum) agar keuangan terkendali.</p>
+      <div class="empty-budget-top">
+        <div class="empty-budget-icon">${icon("budget")}</div>
+        <div class="grow">
+          <h3 class="strong" style="font-size:13px">Belum ada target anggaran</h3>
+          <p class="tiny muted" style="margin-top:2px">Tetapkan limit pengeluaran (misal: Makan & Minum) agar keuangan terkendali.</p>
+        </div>
       </div>
-      <button type="button" class="btn small primary" data-act="budget-new" style="margin-left:auto">${icon("plus")}Atur</button>
+      <button type="button" class="btn small primary w-full" data-act="budget-new" style="margin-top:12px">${icon("plus")}Atur Target Sekarang</button>
     </div>`
   }`;
 }
