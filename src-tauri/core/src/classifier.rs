@@ -1529,11 +1529,12 @@ static MODEL: LazyLock<NaiveBayesModel> = LazyLock::new(NaiveBayesModel::build);
 
 static HIGH_PRIORITY_RULES: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
     vec![
-        (Regex::new(r"(?i)(?:xxi|cgv|cinepolis|bioskop|cinema)").unwrap(), "fun"),
-        (Regex::new(r"(?i)(?:laundry|cuci\s*koin|cuci\s*kiloan|dry\s*clean)").unwrap(), "home"),
-        (Regex::new(r"(?i)(?:spbu|pertamina|shell|bp\s*akr|vivo|pertashop)").unwrap(), "transport"),
-        (Regex::new(r"(?i)(?:pln|pdam|token\s*listrik)").unwrap(), "home"),
-        (Regex::new(r"(?i)(?:indomaret|alfamart|alfamidi|superindo|transmart)").unwrap(), "shop"),
+        (Regex::new(r"(?i)\b(?:xxi|cgv|cinepolis|bioskop|cinema)\b").unwrap(), "fun"),
+        (Regex::new(r"(?i)\b(?:laundry|cuci\s*koin|cuci\s*kiloan|dry\s*clean)\b").unwrap(), "home"),
+        (Regex::new(r"(?i)\b(?:spbu|pertamina|shell|bp\s*akr|vivo|pertashop)\b").unwrap(), "transport"),
+        (Regex::new(r"(?i)\b(?:pln|pdam|token\s*listrik)\b").unwrap(), "home"),
+        (Regex::new(r"(?i)\b(?:idm|indomaret|alfamart|alfamidi|superindo|transmart)\b").unwrap(), "shop"),
+        (Regex::new(r"(?i)\b(?:lumpia|beef|ayam|bebek|soto|sate|bakso|mie|nasi|juice|jus|kuliner|batagor|siomay|seblak|martabak|gorengan)\b").unwrap(), "food"),
     ]
 });
 
