@@ -188,6 +188,15 @@ pub struct Snapshot {
     pub accounts: Vec<Account>,
     pub theme: String,
     pub notifications: Vec<NotificationEvent>,
+    pub budgets: Vec<Budget>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Budget {
+    pub category: String,
+    pub monthly_limit: i64,
+    pub updated_at: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

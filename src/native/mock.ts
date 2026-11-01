@@ -649,6 +649,29 @@ export class MockAPI implements FinanceAPI {
     this.s.theme = theme;
     await this.save();
   }
+  async setBudget(category: string, monthlyLimit: number) {
+    await this.ready;
+    this.s.budgets = this.s.budgets || [];
+    const idx = this.s.budgets.findIndex((b) => b.category === category);
+    if (idx >= 0) {
+      this.s.budgets[idx].monthlyLimit = monthlyLimit;
+      this.s.budgets[idx].updatedAt = new Date().toISOString();
+    } else {
+      this.s.budgets.push({
+        category,
+        monthlyLimit,
+        updatedAt: new Date().toISOString(),
+      });
+    }
+    await this.save();
+  }
+  async deleteBudget(category: string) {
+    await this.ready;
+    if (this.s.budgets) {
+      this.s.budgets = this.s.budgets.filter((b) => b.category !== category);
+    }
+    await this.save();
+  }
   private notificationEnabled = false;
   async notificationStatus() {
     return {

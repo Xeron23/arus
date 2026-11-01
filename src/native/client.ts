@@ -44,6 +44,10 @@ class NativeAPI implements FinanceAPI {
   reconcile: FinanceAPI["reconcile"] = (id, observed, adjust) =>
     invoke("reconcile_wallet", { id, observed, adjust });
   theme: FinanceAPI["theme"] = (theme) => invoke("set_theme", { theme });
+  setBudget: FinanceAPI["setBudget"] = (category, monthlyLimit) =>
+    invoke("set_budget", { category, monthlyLimit });
+  deleteBudget: FinanceAPI["deleteBudget"] = (category) =>
+    invoke("delete_budget", { category });
   notificationStatus: FinanceAPI["notificationStatus"] = () =>
     invoke<import("../models").NotificationStatus>("notification_status");
   notificationOpenSettings: FinanceAPI["notificationOpenSettings"] = () =>

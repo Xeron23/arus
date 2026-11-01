@@ -246,6 +246,53 @@ function walletDetail(id: string) {
     `<div class="detail-amount">${money(w.balance)}</div><div class="detail-merchant">Saldo hasil perhitungan buku kas</div><div class="card"><div class="detail-line"><span>Saldo awal</span><span>${money(w.opening)}</span></div><div class="detail-line"><span>Saldo teramati</span><span>${w.observed === null ? "Belum tersedia" : money(w.observed)}</span></div><div class="detail-line"><span>Selisih</span><span>${w.observed === null ? "—" : money(w.observed - w.balance)}</span></div></div><form id="reconcileForm">${input("observed", "Saldo pembanding rekening", w.observed ?? w.balance, "number", 'required min="0" step="1"')}<label class="toggle-row"><input name="adjust" type="checkbox"><span>Catat penyesuaian selisih<small>Tambahkan mutasi eksplisit. Biarkan kosong untuk hanya menyimpan pembanding.</small></span></label>${err()}<button class="secondary" type="submit">Simpan rekonsiliasi</button></form><div class="button-row">${btn("wallet-edit", "Edit dompet", "secondary", id)}${btn("wallet-transactions", "Lihat mutasi", "secondary", id)}</div>`,
   );
 }
+
+function budgetForm(category: string | null = null) {
+  const existing = data.budgets?.find((b) => b.category === category);
+  sheetId = category || "";
+  const categories = [
+    { id: "food", name: "Makanan & Minuman" },
+    { id: "shop", name: "Belanja" },
+    { id: "transport", name: "Transportasi" },
+    { id: "home", name: "Rumah & Tagihan" },
+    { id: "fun", name: "Hiburan & Gaya Hidup" },
+    { id: "other", name: "Lainnya" },
+  ];
+
+  const catName = existing ? (cats[existing.category]?.name || existing.category) : "";
+
+  sheet(
+    existing ? "Edit Target Anggaran" : "Atur Target Anggaran",
+    `<form id="budgetForm">
+      ${
+        existing
+          ? `<input type="hidden" name="category" value="${esc(existing.category)}">
+             <div class="field-label" style="font-size:12px;color:var(--muted);margin-bottom:4px">Kategori Pengeluaran</div>
+             <div class="card" style="padding:12px 14px;margin-bottom:14px;font-weight:600;font-size:14px">
+               ${esc(catName)}
+             </div>`
+          : `<label class="field-label" for="b-cat" style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px">Pilih Kategori Pengeluaran</label>
+             <select class="field" id="b-cat" name="category" required style="margin-bottom:14px">
+               ${categories
+                 .map(
+                   (c) =>
+                     `<option value="${c.id}" ${category === c.id ? "selected" : ""}>${c.name}</option>`,
+                 )
+                 .join("")}
+             </select>`
+      }
+      <label class="field-label" for="b-limit" style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px">Batas Maksimal Bulanan (Rp)</label>
+      <input class="field" id="b-limit" name="limit" type="number" step="1000" min="1000" max="1000000000" value="${existing?.monthlyLimit || 1500000}" required placeholder="Contoh: 1500000">
+      <p class="tiny muted" style="margin-top:6px;line-height:1.4">Arus akan memantau pengeluaran Anda di kategori ini dan memberikan peringatan saat mendekati batas.</p>
+      ${err()}
+      <div class="button-row" style="margin-top:16px">
+        <button class="primary grow" type="submit">Simpan Anggaran</button>
+        ${existing ? `<button class="btn secondary danger-btn" type="button" data-act="budget-delete-btn" data-id="${esc(existing.category)}">${icon("trash")} Hapus</button>` : ""}
+      </div>
+    </form>`,
+    "Batas anggaran bulanan",
+  );
+}
 function connection(fresh = true) {
   if (fresh) {
     connectionDraft = {
@@ -831,6 +878,20 @@ document.addEventListener("click", async (e) => {
       case "wallet-edit":
         walletForm(id);
         break;
+      case "budget-new":
+        budgetForm();
+        break;
+      case "budget-edit":
+        budgetForm(id);
+        break;
+      case "budget-delete-btn":
+        if (confirm("Hapus target anggaran untuk kategori ini?")) {
+          await api.deleteBudget(id);
+          close();
+          await refresh();
+          toast("Target anggaran dihapus.");
+        }
+        break;
       case "wallet-detail":
         walletDetail(id);
         break;
@@ -1127,6 +1188,18 @@ document.addEventListener("submit", async (e) => {
         await refresh();
         toast("Dompet disimpan.");
         break;
+      case "budgetForm": {
+        const cat = d.category;
+        const limit = Number(d.limit);
+        if (!cat || !limit || limit <= 0) {
+          throw new Error("Nominal target anggaran harus lebih dari 0.");
+        }
+        await api.setBudget(cat, limit);
+        close();
+        await refresh();
+        toast("Target anggaran berhasil disimpan.");
+        break;
+      }
       case "reconcileForm":
         await api.reconcile(sheetId, Number(d.observed), d.adjust === "on");
         {

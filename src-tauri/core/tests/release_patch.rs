@@ -184,3 +184,32 @@ fn test_adaptive_learning_rules_in_db() {
     // It should have learned and automatically classified as "food"!
     assert_eq!(email2.parsed.unwrap().category, "food");
 }
+
+#[test]
+fn test_budget_lifecycle() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Database::open(dir.path().join("budget_test.db")).unwrap();
+
+    // 1. Initial snapshot has empty budgets
+    let snap1 = db.snapshot().unwrap();
+    assert_eq!(snap1.budgets.len(), 0);
+
+    // 2. Set budget for food
+    db.set_budget("food", 1_500_000).unwrap();
+    db.set_budget("transport", 500_000).unwrap();
+
+    let budgets = db.get_budgets().unwrap();
+    assert_eq!(budgets.len(), 2);
+    assert_eq!(budgets.iter().find(|b| b.category == "food").unwrap().monthly_limit, 1_500_000);
+
+    // 3. Update budget for food
+    db.set_budget("food", 2_000_000).unwrap();
+    let snap2 = db.snapshot().unwrap();
+    assert_eq!(snap2.budgets.iter().find(|b| b.category == "food").unwrap().monthly_limit, 2_000_000);
+
+    // 4. Delete budget
+    db.delete_budget("transport").unwrap();
+    let snap3 = db.snapshot().unwrap();
+    assert_eq!(snap3.budgets.len(), 1);
+    assert_eq!(snap3.budgets[0].category, "food");
+}

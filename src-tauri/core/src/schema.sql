@@ -31,3 +31,8 @@ CREATE TABLE IF NOT EXISTS merchant_rules(
  category TEXT NOT NULL,
  updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS budgets(
+ category TEXT PRIMARY KEY,
+ monthly_limit INTEGER NOT NULL CHECK(typeof(monthly_limit)='integer' AND monthly_limit>0),
+ updated_at TEXT NOT NULL
+);

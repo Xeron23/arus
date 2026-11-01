@@ -95,3 +95,54 @@ describe("sync range preferences", () => {
     setSyncRange("30");
   });
 });
+
+describe("budget guard ui", () => {
+  it("renders empty state when no budgets exist", async () => {
+    const { budgetSection } = await import("../src/ui/templates");
+    const snapshot: any = {
+      wallets: [],
+      transactions: [],
+      emails: [],
+      accounts: [],
+      theme: "light",
+      budgets: [],
+    };
+    const view: any = { month: "2026-11", wallet: "all" };
+    const html = budgetSection(snapshot, view);
+    expect(html).toContain("Target Anggaran Bulanan");
+    expect(html).toContain("Belum ada target anggaran");
+    expect(html).toContain("budget-new");
+  });
+
+  it("renders progress bar and category metrics when budgets exist", async () => {
+    const { budgetSection } = await import("../src/ui/templates");
+    const snapshot: any = {
+      wallets: [],
+      transactions: [
+        {
+          id: "tx-1",
+          kind: "expense",
+          amount: 500000,
+          category: "food",
+          occurredAt: "2026-11-01T10:00:00",
+        },
+      ],
+      emails: [],
+      accounts: [],
+      theme: "light",
+      budgets: [
+        {
+          category: "food",
+          monthlyLimit: 1000000,
+          updatedAt: "2026-11-01T00:00:00",
+        },
+      ],
+    };
+    const view: any = { month: "2026-11", wallet: "all" };
+    const html = budgetSection(snapshot, view);
+    expect(html).toContain("Makanan &amp; Minuman");
+    expect(html).toContain("50% · Aman");
+    expect(html).toContain("Target: Rp1.000.000/bln");
+    expect(html).toContain("Sisa: Rp500.000");
+  });
+});

@@ -214,6 +214,22 @@ async fn set_theme(state: State<'_, AppState>, theme: String) -> Result<()> {
     let db = state.db.clone();
     blocking(move || db.set_theme(&theme)).await
 }
+
+#[tauri::command]
+async fn set_budget(
+    state: State<'_, AppState>,
+    category: String,
+    monthly_limit: i64,
+) -> Result<()> {
+    let db = state.db.clone();
+    blocking(move || db.set_budget(&category, monthly_limit)).await
+}
+
+#[tauri::command]
+async fn delete_budget(state: State<'_, AppState>, category: String) -> Result<()> {
+    let db = state.db.clone();
+    blocking(move || db.delete_budget(&category)).await
+}
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -244,6 +260,8 @@ pub fn run() {
             reconcile_wallet,
             update_email_account,
             set_theme,
+            set_budget,
+            delete_budget,
             notifications::notification_status,
             notifications::notification_open_settings,
             notifications::notification_set_enabled,

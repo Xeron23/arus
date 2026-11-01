@@ -91,6 +91,12 @@ export interface EmailRecord {
   reason: string;
   parsed: Parsed | null;
 }
+export interface Budget {
+  category: string;
+  monthlyLimit: number;
+  updatedAt: string;
+}
+
 export interface Snapshot {
   wallets: Wallet[];
   transactions: LedgerEntry[];
@@ -98,6 +104,7 @@ export interface Snapshot {
   accounts: Account[];
   theme: Theme;
   notifications?: NotificationEvent[];
+  budgets?: Budget[];
 }
 export interface NotificationEvent {
   id: string;
@@ -192,6 +199,8 @@ export interface FinanceAPI {
   wallet(input: WalletInput): Promise<string>;
   reconcile(id: string, observed: number, adjust: boolean): Promise<void>;
   theme(theme: Theme): Promise<void>;
+  setBudget(category: string, monthlyLimit: number): Promise<void>;
+  deleteBudget(category: string): Promise<void>;
   notificationStatus(): Promise<NotificationStatus>;
   notificationOpenSettings(): Promise<void>;
   notificationSetEnabled(enabled: boolean): Promise<void>;

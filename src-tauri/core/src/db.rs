@@ -119,6 +119,16 @@ impl Database {
             })
             .optional()?
             .unwrap_or_else(|| "light".into());
+        let mut q_budgets = c.prepare("SELECT category, monthly_limit, updated_at FROM budgets ORDER BY category")?;
+        let budgets = q_budgets
+            .query_map([], |r| {
+                Ok(Budget {
+                    category: r.get(0)?,
+                    monthly_limit: r.get(1)?,
+                    updated_at: r.get(2)?,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok(Snapshot {
             wallets,
             transactions,
@@ -126,6 +136,7 @@ impl Database {
             accounts,
             theme,
             notifications: crate::notifications::read_events(&c)?,
+            budgets,
         })
     }
     pub fn accounts(&self) -> Result<Vec<Account>> {
@@ -583,6 +594,40 @@ impl Database {
             }
         }
         Ok(map)
+    }
+
+    pub fn set_budget(&self, category: &str, monthly_limit: i64) -> Result<()> {
+        let c = self.connection()?;
+        let now = Utc::now().to_rfc3339();
+        c.execute(
+            "INSERT INTO budgets(category, monthly_limit, updated_at) VALUES(?1, ?2, ?3)
+             ON CONFLICT(category) DO UPDATE SET monthly_limit=excluded.monthly_limit, updated_at=excluded.updated_at",
+            params![category, monthly_limit, now],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_budget(&self, category: &str) -> Result<()> {
+        let c = self.connection()?;
+        c.execute("DELETE FROM budgets WHERE category=?1", params![category])?;
+        Ok(())
+    }
+
+    pub fn get_budgets(&self) -> Result<Vec<Budget>> {
+        let c = self.connection()?;
+        let mut stmt = c.prepare("SELECT category, monthly_limit, updated_at FROM budgets ORDER BY category")?;
+        let rows = stmt.query_map([], |r| {
+            Ok(Budget {
+                category: r.get(0)?,
+                monthly_limit: r.get(1)?,
+                updated_at: r.get(2)?,
+            })
+        })?;
+        let mut list = Vec::new();
+        for b in rows {
+            list.push(b?);
+        }
+        Ok(list)
     }
 }
 fn advance(tx: &Transaction<'_>, m: &MailInput) -> Result<()> {

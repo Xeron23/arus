@@ -175,6 +175,72 @@ export function chart(s: Snapshot, v: View) {
 function walletCard(w: Wallet) {
   return `<button class="wallet-card" data-act="wallet-detail" data-id="${esc(w.id)}"><div class="row"><span class="wallet-brand bank-color">${esc(w.bank.slice(0, 3).toUpperCase())}</span><span class="grow"><b class="small">${esc(w.name)}</b><span class="tiny muted" style="display:block">${esc(w.kind)}${w.digits ? " · •••• " + esc(w.digits) : ""}</span></span>${icon("chevron")}</div><div class="wallet-amount">${money(w.balance)}</div><div class="wallet-bottom"><span>Buku kas lokal</span><span>${w.observed === null ? "Atur saldo awal" : w.observed === w.balance ? "✓ Saldo cocok" : "Selisih " + money(Math.abs(w.observed - w.balance))}</span></div></button>`;
 }
+
+export function budgetSection(s: Snapshot, v: View) {
+  const budgets = s.budgets || [];
+  const list = monthEntries(s, v);
+
+  const cards = budgets
+    .map((b) => {
+      const meta = cats[b.category] || {
+        name: b.category,
+        icon: "receipt",
+        color: "#a1bb7c",
+      };
+      const spent = list
+        .filter((t) => t.kind === "expense" && t.category === b.category)
+        .reduce((sum, t) => sum + t.amount, 0);
+      const rawPct =
+        b.monthlyLimit > 0 ? Math.round((spent / b.monthlyLimit) * 100) : 0;
+      const barPct = Math.min(rawPct, 100);
+      const isOver = rawPct >= 100;
+      const isWarn = rawPct >= 80 && rawPct < 100;
+      const statusClass = isOver ? "over" : isWarn ? "warn" : "";
+      const badgeText = isOver
+        ? "Over limit!"
+        : isWarn
+          ? "Mendekati limit"
+          : "Aman";
+      const badgeClass = isOver ? "danger" : isWarn ? "warning" : "success";
+      const sisa = b.monthlyLimit - spent;
+
+      return `<div class="card budget-card" data-act="budget-edit" data-id="${esc(b.category)}">
+        <div class="row between" style="margin-bottom:6px">
+          <div class="row" style="gap:10px">
+            <span class="cat-icon" style="background:${meta.color}22;color:${meta.color}">${icon(meta.icon)}</span>
+            <div>
+              <h3 class="strong">${esc(meta.name)}</h3>
+              <p class="tiny muted">${spent ? `${money(spent)} terpakai` : "Belum ada pengeluaran"}</p>
+            </div>
+          </div>
+          <span class="budget-badge ${badgeClass}">${rawPct}% · ${badgeText}</span>
+        </div>
+        <div class="progress">
+          <span class="${statusClass}" style="width: ${barPct}%"></span>
+        </div>
+        <div class="budget-row">
+          <span>Target: ${money(b.monthlyLimit)}/bln</span>
+          <span>${sisa >= 0 ? `Sisa: ${money(sisa)}` : `Lebih: ${money(Math.abs(sisa))}`}</span>
+        </div>
+      </div>`;
+    })
+    .join("");
+
+  return `<div class="section-title">
+    <h2>Target Anggaran Bulanan</h2>
+    <button class="text-btn" data-act="budget-new">${icon("plus")}Atur Target</button>
+  </div>${
+    cards ||
+    `<div class="card empty-budget-card" data-act="budget-new">
+      <div class="empty-budget-icon">${icon("budget")}</div>
+      <div class="grow">
+        <h3 class="strong" style="font-size:13px">Belum ada target anggaran</h3>
+        <p class="tiny muted" style="margin-top:2px">Tetapkan limit pengeluaran (misal: Makan & Minum) agar keuangan terkendali.</p>
+      </div>
+      <button type="button" class="btn small primary" data-act="budget-new" style="margin-left:auto">${icon("plus")}Atur</button>
+    </div>`
+  }`;
+}
 export function dashboard(s: Snapshot, v: View, native: boolean) {
   const list = monthEntries(s, v),
     income = list
@@ -191,7 +257,7 @@ export function dashboard(s: Snapshot, v: View, native: boolean) {
     v.wallet === "all"
       ? "Semua dompet"
       : s.wallets.find((w) => w.id === v.wallet)?.name || "Semua dompet";
-  return `<div class="row between"><p class="greeting">Halo, selamat datang kembali 👋</p>${monthSelect(s, v)}</div><h1 class="page-title">Uangmu, dalam kendali.</h1><section class="hero"><div class="row between"><label>Total saldo ${btn("hide-balance", icon("eye"), "eye")}</label><button type="button" class="wallet-select-btn" data-act="open-wallet-picker" aria-label="Dompet dashboard"><span>${esc(selectedWalletName)}</span><span class="select-chevron">${icon("chevron")}</span></button></div><div class="balance">${v.hidden ? "••••••••" : `<small>Rp</small>${balance.toLocaleString("id-ID")}`}</div><div class="hero-bottom"><i class="live"></i>${native ? "Tersimpan di ponselmu" : "Mode browser · data demo"}<b>${s.wallets.length} dompet</b></div></section><div class="flow-grid"><div class="flow-card"><div class="row" style="gap:0"><span class="flow-icon">${icon("down")}</span><label>Pemasukan bulan ini</label></div><strong>${v.hidden ? "••••••" : money(income)}</strong></div><div class="flow-card"><div class="row" style="gap:0"><span class="flow-icon out">${icon("up")}</span><label>Pengeluaran bulan ini</label></div><strong>${v.hidden ? "••••••" : money(expense)}</strong></div></div><div class="quick-actions"><button class="quick-action" data-act="manual"><i>${icon("plus")}</i>Catat uang</button><button class="quick-action" data-act="transfer"><i>${icon("transfer")}</i>Transfer</button><button class="quick-action" data-act="sync"><i>${icon("sync")}</i>Tarik email</button><button class="quick-action" data-act="analytics"><i>${icon("chart")}</i>Analitik</button></div><div id="syncInline"></div>${pending ? `<button class="review-banner" data-page="review"><span class="mini-symbol">${icon("mail")}</span><span class="grow"><strong>${pending} transaksi menunggu review</strong><small>Kenali merchant, lalu masukkan ke buku kas.</small></span>${icon("chevron")}</button>` : ""}${native && !s.accounts.length ? '<div class="notice">Mulai dengan mengatur saldo awal dompet dan menghubungkan email di Pengaturan.</div>' : ""}<div class="section-title"><h2>Dompetmu</h2><button class="text-btn" data-act="wallet-new">${icon("plus")}Tambah</button></div><div class="wallet-carousel" aria-label="Geser kartu dompet">${s.wallets.map(walletCard).join("")}</div><div class="section-title"><h2>Arus kas</h2><button class="text-btn" data-act="analytics">Lihat detail ${icon("chevron")}</button></div><div class="card chart-card">${chart(s, v)}</div><div class="section-title"><h2>Transaksi terbaru</h2><button class="text-btn" data-page="transactions">Lihat semua ${icon("chevron")}</button></div>${
+  return `<div class="row between"><p class="greeting">Halo, selamat datang kembali 👋</p>${monthSelect(s, v)}</div><h1 class="page-title">Uangmu, dalam kendali.</h1><section class="hero"><div class="row between"><label>Total saldo ${btn("hide-balance", icon("eye"), "eye")}</label><button type="button" class="wallet-select-btn" data-act="open-wallet-picker" aria-label="Dompet dashboard"><span>${esc(selectedWalletName)}</span><span class="select-chevron">${icon("chevron")}</span></button></div><div class="balance">${v.hidden ? "••••••••" : `<small>Rp</small>${balance.toLocaleString("id-ID")}`}</div><div class="hero-bottom"><i class="live"></i>${native ? "Tersimpan di ponselmu" : "Mode browser · data demo"}<b>${s.wallets.length} dompet</b></div></section><div class="flow-grid"><div class="flow-card"><div class="row" style="gap:0"><span class="flow-icon">${icon("down")}</span><label>Pemasukan bulan ini</label></div><strong>${v.hidden ? "••••••" : money(income)}</strong></div><div class="flow-card"><div class="row" style="gap:0"><span class="flow-icon out">${icon("up")}</span><label>Pengeluaran bulan ini</label></div><strong>${v.hidden ? "••••••" : money(expense)}</strong></div></div><div class="quick-actions"><button class="quick-action" data-act="manual"><i>${icon("plus")}</i>Catat uang</button><button class="quick-action" data-act="transfer"><i>${icon("transfer")}</i>Transfer</button><button class="quick-action" data-act="sync"><i>${icon("sync")}</i>Tarik email</button><button class="quick-action" data-act="analytics"><i>${icon("chart")}</i>Analitik</button></div><div id="syncInline"></div>${pending ? `<button class="review-banner" data-page="review"><span class="mini-symbol">${icon("mail")}</span><span class="grow"><strong>${pending} transaksi menunggu review</strong><small>Kenali merchant, lalu masukkan ke buku kas.</small></span>${icon("chevron")}</button>` : ""}${native && !s.accounts.length ? '<div class="notice">Mulai dengan mengatur saldo awal dompet dan menghubungkan email di Pengaturan.</div>' : ""}<div class="section-title"><h2>Dompetmu</h2><button class="text-btn" data-act="wallet-new">${icon("plus")}Tambah</button></div><div class="wallet-carousel" aria-label="Geser kartu dompet">${s.wallets.map(walletCard).join("")}</div>${budgetSection(s, v)}<div class="section-title"><h2>Arus kas</h2><button class="text-btn" data-act="analytics">Lihat detail ${icon("chevron")}</button></div><div class="card chart-card">${chart(s, v)}</div><div class="section-title"><h2>Transaksi terbaru</h2><button class="text-btn" data-page="transactions">Lihat semua ${icon("chevron")}</button></div>${
     [...list]
       .sort((a, b) => Date.parse(b.occurredAt) - Date.parse(a.occurredAt))
       .slice(0, 5)
